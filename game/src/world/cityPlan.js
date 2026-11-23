@@ -1,6 +1,6 @@
 // City layout, road grid, GPS pathfinder, landmarks, races, stunt ramps, shells, and shops.
 
-import { DISTRICTS } from '../core/config.js';
+import { DISTRICTS, PROPERTIES } from '../core/config.js';
 
 export const ROAD_X = [-340, -180, 0, 180, 340];
 export const ROAD_Z = [-340, -180, 0, 120, 200];
@@ -8,20 +8,15 @@ export const ROAD_Z = [-340, -180, 0, 120, 200];
 export const LANDMARKS = [
   { id: 'hotel-solsticio', name: 'HOTEL SOLSTICIO', x: -120, z: 162, district: 'paseo-dorado', type: 'landmark' },
   { id: 'casa-ambar', name: 'CASA AMBAR', x: -255, z: 162, district: 'paseo-dorado', type: 'landmark' },
-  { id: 'mirador-plaza', name: 'MIRADOR PLAZA', x: 52, z: -64, district: 'distrito-torre', type: 'landmark' },
+  { id: 'mirador-plaza', name: 'MIRADOR VAULT', x: 52, z: -40, district: 'distrito-torre', type: 'vault' },
   { id: 'puente-del-sol', name: 'PUENTE DEL SOL', x: 110, z: 200, district: 'distrito-torre', type: 'bridge' },
   { id: 'mercado-arch', name: 'MERCADO NOCTURNO', x: -310, z: -55, district: 'mercado-nocturno', type: 'landmark' },
-  { id: 'rafas-garage', name: "RAFA'S GARAGE", x: 144, z: -260, district: 'barrio-viejo', type: 'garage' },
-  { id: 'el-taller', name: 'EL TALLER ARMORY', x: -242, z: -135, district: 'mercado-nocturno', type: 'gunsmith' },
-  { id: 'safehouse', name: 'ESMERALDA SAFEHOUSE', x: 264, z: 224, district: 'bahia-esmeralda', type: 'safehouse' },
+  { id: 'rafas-garage', name: "RAFA'S GARAGE", x: 150, z: -242, district: 'barrio-viejo', type: 'garage' },
+  { id: 'el-taller', name: 'EL TALLER ARMORY', x: -244, z: -124, district: 'mercado-nocturno', type: 'gunsmith' },
+  { id: 'safehouse', name: 'ESMERALDA DOCK', x: 264, z: 182, district: 'bahia-esmeralda', type: 'marina' },
 ];
 
-export const SHOPS = [
-  { id: 'garage-main', name: "Rafa's Garage", kind: 'garage', x: 155, z: -250, radius: 16 },
-  { id: 'garage-beach', name: 'Solsticio Customs', kind: 'garage', x: -165, z: 175, radius: 15 },
-  { id: 'gunsmith-mercado', name: 'El Taller Gunsmith', kind: 'gunsmith', x: -245, z: -125, radius: 15 },
-  { id: 'safehouse-marina', name: 'Bahia Esmeralda Safehouse', kind: 'safehouse', x: 260, z: 215, radius: 16 },
-];
+export const SHOPS = PROPERTIES;
 
 export const STUNT_RAMPS = [
   { id: 'stunt-1', name: 'Solsticio Boardwalk Leap', x: -185, z: 214, yaw: Math.PI * 0.5, targetDist: 38 },

@@ -1,7 +1,7 @@
 // High-contrast tactical radar minimap with streets, coastline, GPS path, police blips, helicopter, and icons.
 
-import { DISTRICTS } from '../core/config.js';
-import { ROAD_X, ROAD_Z, SHOPS, computeGpsPath } from '../world/cityPlan.js';
+import { DISTRICTS, PROPERTIES } from '../core/config.js';
+import { ROAD_X, ROAD_Z, computeGpsPath } from '../world/cityPlan.js';
 
 export class MinimapRenderer {
   constructor(canvas) {
@@ -95,12 +95,34 @@ export class MinimapRenderer {
       }
     }
 
-    // Shop icons
-    for (const sh of SHOPS) {
-      const s = toScreen(sh.x, sh.z);
+    // 8 Interactive City Property icons (owned = filled house diamond, purchasable = outlined icon)
+    for (const prop of PROPERTIES) {
+      const s = toScreen(prop.x, prop.z);
       if (s.x < -8 || s.x > W + 8 || s.y < -8 || s.y > H + 8) continue;
-      ctx.fillStyle = sh.kind === 'garage' ? '#34e0c8' : sh.kind === 'gunsmith' ? '#ff6b4a' : '#ffbe55';
-      ctx.fillRect(s.x - 3.5, s.y - 3.5, 7, 7);
+      const owned = state.ownedProperties?.has(prop.id);
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.beginPath();
+      ctx.moveTo(0, -5);
+      ctx.lineTo(4.5, -1);
+      ctx.lineTo(4.5, 4);
+      ctx.lineTo(-4.5, 4);
+      ctx.lineTo(-4.5, -1);
+      ctx.closePath();
+      if (owned) {
+        ctx.fillStyle = prop.color;
+        ctx.fill();
+        ctx.strokeStyle = '#090e18';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = 'rgba(12, 18, 28, 0.88)';
+        ctx.fill();
+        ctx.strokeStyle = prop.color;
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+      }
+      ctx.restore();
     }
 
     // Enemy blips

@@ -10,7 +10,10 @@
 <body>
   <canvas id="game-canvas" aria-label="Cala Dorada open-world 3D action game"></canvas>
 
-  <!-- Aiming Reticle (On-Foot Combat) -->
+  <!-- World-Space Projected Combat Layer (Enemy Threat Markers, HP Bars & Floating Weapon Damage Numbers) -->
+  <div id="combat-world-layer" class="combat-world-layer hidden" aria-hidden="true"></div>
+
+  <!-- Aiming Reticle with Dynamic Hit-Confirm Crosshair (On-Foot Combat) -->
   <div id="reticle" class="reticle hidden" aria-hidden="true">
     <div class="reticle-ring"></div>
     <div class="reticle-dot"></div>
@@ -18,6 +21,10 @@
     <div class="reticle-tick t-bottom"></div>
     <div class="reticle-tick t-left"></div>
     <div class="reticle-tick t-right"></div>
+    <div class="hit-x hx-tl"></div>
+    <div class="hit-x hx-tr"></div>
+    <div class="hit-x hx-bl"></div>
+    <div class="hit-x hx-br"></div>
   </div>
 
   <!-- Live Gameplay HUD -->

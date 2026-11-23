@@ -124,37 +124,56 @@ export function createVehicleMesh(typeKey, overrideColor = null) {
     }
   }
 
-  // Cabin / greenhouse with raked windshield and fastback rear
+  // Cabin / greenhouse with raked windshield and fastback rear (or open-top roadster for convertibles)
   const cabW = W * (spec.isSwat ? 0.94 : isSuper ? 0.78 : 0.82);
   const cabH = spec.isSwat ? H * 0.42 : isSuper ? H * 0.36 : H * 0.42;
   const cabL = spec.isSwat ? L * 0.78 : isSuper ? L * 0.38 : L * 0.44;
   const cabZ = spec.isSwat ? -0.15 : isSuper ? -0.22 : -0.24;
   const cabY = 0.44 + chassisH + cabH / 2 - 0.06;
 
-  const roof = new THREE.Mesh(
-    new THREE.BoxGeometry(cabW, cabH * 0.92, cabL),
-    spec.isPolice && !spec.isSwat ? accentMat : isSuper ? paintMat : glassMat
-  );
-  roof.position.set(0, cabY, cabZ);
-  roof.castShadow = true;
-  g.add(roof);
+  if (spec.isConvertible) {
+    // Open-top roadster interior tub, twin bucket seats & raked windshield
+    const tub = new THREE.Mesh(new THREE.BoxGeometry(cabW * 0.96, 0.22, cabL * 1.15), darkMat);
+    tub.position.set(0, 0.44 + chassisH + 0.02, cabZ);
+    g.add(tub);
+    const seatMat = new THREE.MeshStandardMaterial({ color: 0xf4e3c8, roughness: 0.72 });
+    for (const sx of [-0.4, 0.4]) {
+      const seat = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.48, 0.42), seatMat);
+      seat.position.set(sx, 0.44 + chassisH + 0.24, cabZ - 0.18);
+      g.add(seat);
+    }
+    const windF = new THREE.Mesh(new THREE.BoxGeometry(cabW * 0.94, cabH * 1.05, 0.12), glassMat);
+    windF.position.set(0, cabY - 0.04, cabZ + cabL / 2 + 0.22);
+    windF.rotation.x = -0.68;
+    const frameTop = new THREE.Mesh(new THREE.BoxGeometry(cabW * 0.96, 0.07, 0.14), chromeMat);
+    frameTop.position.set(0, cabY + cabH * 0.32, cabZ + cabL / 2 + 0.02);
+    g.add(windF, frameTop);
+  } else {
+    const roof = new THREE.Mesh(
+      new THREE.BoxGeometry(cabW, cabH * 0.92, cabL),
+      spec.isPolice && !spec.isSwat ? accentMat : isSuper ? paintMat : glassMat
+    );
+    roof.position.set(0, cabY, cabZ);
+    roof.castShadow = true;
+    g.add(roof);
 
-  // Side windows wrap
-  const sideGlass = new THREE.Mesh(new THREE.BoxGeometry(cabW + 0.04, cabH * 0.68, cabL * 0.92), glassMat);
-  sideGlass.position.set(0, cabY - 0.02, cabZ);
-  g.add(sideGlass);
+    // Side windows wrap
+    const sideGlass = new THREE.Mesh(new THREE.BoxGeometry(cabW + 0.04, cabH * 0.68, cabL * 0.92), glassMat);
+    sideGlass.position.set(0, cabY - 0.02, cabZ);
+    g.add(sideGlass);
 
-  // Sloped front windshield & rear fastback glass
-  const windF = new THREE.Mesh(new THREE.BoxGeometry(cabW * 0.92, cabH * 1.18, 0.14), glassMat);
-  windF.position.set(0, cabY - 0.02, cabZ + cabL / 2 + 0.24);
-  windF.rotation.x = isSuper ? -0.82 : spec.isSwat ? -0.22 : -0.58;
-  g.add(windF);
+    // Sloped front windshield & rear fastback glass
+    const windF = new THREE.Mesh(new THREE.BoxGeometry(cabW * 0.92, cabH * 1.18, 0.14), glassMat);
+    windF.position.set(0, cabY - 0.02, cabZ + cabL / 2 + 0.24);
+    windF.rotation.x = isSuper ? -0.82 : spec.isSwat ? -0.22 : -0.58;
+    g.add(windF);
 
-  if (!spec.isSwat) {
-    const windR = new THREE.Mesh(new THREE.BoxGeometry(cabW * 0.88, cabH * 1.25, 0.14), glassMat);
-    windR.position.set(0, cabY - 0.03, cabZ - cabL / 2 - 0.26);
-    windR.rotation.x = isSuper ? 0.88 : 0.6;
-    g.add(windR);
+    if (!spec.isSwat) {
+      const windR = new THREE.Mesh(new THREE.BoxGeometry(cabW * 0.88, cabH * 1.25, 0.14), glassMat);
+      windR.position.set(0, cabY - 0.03, cabZ - cabL / 2 - 0.26);
+      windR.rotation.x = isSuper ? 0.88 : 0.6;
+      g.add(windR);
+    }
   }
 
   // Hero Dorado Apex GT bespoke trim: twin racing stripes, GT carbon rear wing, twin exhaust & nitro flames
@@ -219,14 +238,14 @@ export function createVehicleMesh(typeKey, overrideColor = null) {
   bumperR.position.set(0, 0.44, -L / 2 - 0.05);
   g.add(bumperF, bumperR);
 
-  // Blazing LED Headlights + Additive Flare Sprites & Full-Width Taillight Bar
+  // Crisp focused LED Headlights + Tight Additive Flare Sprites & Full-Width Taillight Bar
   const headMat = new THREE.MeshBasicMaterial({ color: 0xfff8de });
   const tailMat = new THREE.MeshBasicMaterial({ color: 0xff2442 });
   for (const sx of [-W * 0.35, W * 0.35]) {
     const hl = new THREE.Mesh(new THREE.BoxGeometry(isSuper ? 0.54 : 0.44, 0.15, 0.12), headMat);
     hl.position.set(sx, isSuper ? 0.64 : 0.72, L / 2 + 0.06);
-    const hlFlare = makeFlareSprite('#ffffff', 'rgba(255,226,158,0.85)', isSuper ? 1.85 : 1.35, isSuper ? 0.92 : 0.65);
-    hlFlare.position.set(sx, isSuper ? 0.65 : 0.73, L / 2 + 0.24);
+    const hlFlare = makeFlareSprite('#ffffff', 'rgba(255,226,158,0.72)', isSuper ? 1.15 : 0.82, isSuper ? 0.78 : 0.52);
+    hlFlare.position.set(sx, isSuper ? 0.65 : 0.73, L / 2 + 0.2);
     const tl = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.16, 0.12), tailMat);
     tl.position.set(sx, 0.74, -L / 2 - 0.06);
     g.add(hl, hlFlare, tl);
@@ -237,14 +256,14 @@ export function createVehicleMesh(typeKey, overrideColor = null) {
     g.add(tailStrip);
   }
 
-  // Soft additive headlight beams on road
+  // Tight focused additive headlight beams (sharp pools without flooding the entire lane)
   const beamMat = new THREE.MeshBasicMaterial({
-    color: 0xffebba, transparent: true, opacity: 0.13, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    color: 0xffebba, transparent: true, opacity: 0.085, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
   });
   for (const sx of [-W * 0.34, W * 0.34]) {
-    const beam = new THREE.Mesh(new THREE.ConeGeometry(0.95, 5.8, 10, 1, true), beamMat);
+    const beam = new THREE.Mesh(new THREE.ConeGeometry(0.52, 3.6, 10, 1, true), beamMat);
     beam.rotation.x = -Math.PI / 2;
-    beam.position.set(sx, 0.52, L / 2 + 2.9);
+    beam.position.set(sx, 0.48, L / 2 + 1.85);
     g.add(beam);
   }
 
@@ -289,11 +308,11 @@ export function createVehicleMesh(typeKey, overrideColor = null) {
     const blueDom = new THREE.Mesh(new THREE.BoxGeometry(cabW * 0.36, 0.2, 0.38), blueMat);
     blueDom.position.set(cabW * 0.21, barY + 0.12, cabZ + 0.12);
 
-    // Additive lens flare halos so red/blue emergency lights blaze vividly without solid bubble artifacts!
-    const redGlow = makeFlareSprite('#fff0f3', 'rgba(255,34,68,0.88)', 3.6, 0.95);
-    redGlow.position.copy(redDom.position).add(new THREE.Vector3(0, 0.1, 0));
-    const blueGlow = makeFlareSprite('#e8f6ff', 'rgba(42,154,255,0.88)', 3.6, 0.95);
-    blueGlow.position.copy(blueDom.position).add(new THREE.Vector3(0, 0.1, 0));
+    // Tight crisp additive lens flare halos for police lightbars (sharp without flooding adjacent lanes)
+    const redGlow = makeFlareSprite('#fff0f3', 'rgba(255,34,68,0.84)', 2.05, 0.84);
+    redGlow.position.copy(redDom.position).add(new THREE.Vector3(0, 0.08, 0));
+    const blueGlow = makeFlareSprite('#e8f6ff', 'rgba(42,154,255,0.84)', 2.05, 0.84);
+    blueGlow.position.copy(blueDom.position).add(new THREE.Vector3(0, 0.08, 0));
 
     g.add(redDom, blueDom, redGlow, blueGlow);
     lightbar = { redDom, blueDom, redGlow, blueGlow };
@@ -377,11 +396,11 @@ export function createBurningWreck() {
   hull.position.y = 0.22;
   g.add(hull);
 
-  // Additive radial fireball bloom halos so the explosion blazes with true Hollywood intensity!
-  const bloomBig = makeFlareSprite('#fffbe0', 'rgba(255,112,24,0.92)', 13.5, 0.96);
-  bloomBig.position.set(0.2, 3.0, 0.2);
-  const bloomCore = makeFlareSprite('#ffffff', 'rgba(255,226,102,0.95)', 7.6, 1.0);
-  bloomCore.position.set(0.0, 2.5, 0.4);
+  // Focused additive fireball bloom halos (dramatic yet contained to wreck zone)
+  const bloomBig = makeFlareSprite('#fffbe0', 'rgba(255,112,24,0.86)', 9.6, 0.88);
+  bloomBig.position.set(0.2, 2.8, 0.2);
+  const bloomCore = makeFlareSprite('#ffffff', 'rgba(255,226,102,0.92)', 5.6, 0.95);
+  bloomCore.position.set(0.0, 2.4, 0.4);
   g.add(bloomBig, bloomCore);
 
   // Layered flame lobes
@@ -435,9 +454,9 @@ export function createBurningWreck() {
     smokePuffs.push(sm);
   }
 
-  // Intense orange fire illumination on the bridge deck & nearby cars
-  const fireLight = new THREE.PointLight(0xff7722, 65, 42, 1.4);
-  fireLight.position.set(0, 3.6, 0);
+  // Localized orange fire illumination on the bridge deck & nearby cars
+  const fireLight = new THREE.PointLight(0xff7722, 34, 22, 2.0);
+  fireLight.position.set(0, 3.4, 0);
   g.add(fireLight);
 
   g.userData = { fireCores, smokePuffs, fireLight, bloomBig, bloomCore };
@@ -453,16 +472,16 @@ export function animateBurningWreck(wreck, elapsed) {
     f.rotation.y = elapsed * (1.8 + i * 0.4);
   });
   if (bloomBig) {
-    const bsc = 13.0 + Math.sin(elapsed * 14) * 1.6;
+    const bsc = 9.4 + Math.sin(elapsed * 14) * 1.1;
     bloomBig.scale.set(bsc, bsc, 1);
   }
   if (bloomCore) {
-    const csc = 7.4 + Math.cos(elapsed * 17) * 0.9;
+    const csc = 5.4 + Math.cos(elapsed * 17) * 0.7;
     bloomCore.scale.set(csc, csc, 1);
   }
   smokePuffs.forEach((s, i) => {
     s.position.y = 5.4 + ((elapsed * 2.4 + i * 2.1) % 12.5);
     s.rotation.y = elapsed * 0.6 + i;
   });
-  if (fireLight) fireLight.intensity = 60 + Math.sin(elapsed * 18) * 12;
+  if (fireLight) fireLight.intensity = 32 + Math.sin(elapsed * 18) * 7;
 }

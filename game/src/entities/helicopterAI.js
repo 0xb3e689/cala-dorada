@@ -1,4 +1,4 @@
-// CDPD HALCÓN-1 tactical helicopter with sculpted fuselage, spinning rotors, nav lights, and volumetric gradient spotlight.
+// CDPD HALCÓN-1 tactical helicopter with detailed white/navy/coral CDPD fuselage, glowing cockpit, twin skids, 4-blade rotor, strobes & focused volumetric searchlight.
 
 import * as THREE from '../../vendor/three.module.min.js';
 import { getRadialGlowTexture } from './vehicleFactory.js';
@@ -9,12 +9,47 @@ function createSpotlightBeamTexture() {
   c.height = 256;
   const g = c.getContext('2d');
   const grad = g.createLinearGradient(0, 0, 0, 256);
-  grad.addColorStop(0.0, 'rgba(255, 252, 232, 0.85)');
-  grad.addColorStop(0.18, 'rgba(255, 240, 195, 0.44)');
-  grad.addColorStop(0.6, 'rgba(255, 232, 178, 0.16)');
+  grad.addColorStop(0.0, 'rgba(255, 252, 232, 0.82)');
+  grad.addColorStop(0.16, 'rgba(255, 240, 198, 0.38)');
+  grad.addColorStop(0.58, 'rgba(255, 232, 180, 0.12)');
   grad.addColorStop(1.0, 'rgba(255, 224, 165, 0.0)');
   g.fillStyle = grad;
   g.fillRect(0, 0, 64, 256);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function createHeliSideLiveryTexture() {
+  const c = document.createElement('canvas');
+  c.width = 512;
+  c.height = 160;
+  const g = c.getContext('2d');
+  // Crisp glossy white upper body + deep-navy CDPD lower hull
+  g.fillStyle = '#f2f6ff';
+  g.fillRect(0, 0, 512, 92);
+  g.fillStyle = '#152746';
+  g.fillRect(0, 92, 512, 68);
+  // Coral-red & gold accent stripes
+  g.fillStyle = '#ff4757';
+  g.fillRect(0, 82, 512, 13);
+  g.fillStyle = '#ffc84d';
+  g.fillRect(0, 95, 512, 8);
+  // Side cabin windows
+  g.fillStyle = '#244b70';
+  g.fillRect(62, 22, 96, 46);
+  g.fillRect(174, 22, 96, 46);
+  g.strokeStyle = '#d4e2f5';
+  g.lineWidth = 3;
+  g.strokeRect(62, 22, 96, 46);
+  g.strokeRect(174, 22, 96, 46);
+  // Crisp CDPD HALCÓN-1 stencil
+  g.font = '900 32px "Avenir Next", system-ui, sans-serif';
+  g.fillStyle = '#152746';
+  g.fillText('CDPD', 298, 56);
+  g.font = '900 22px "Avenir Next", system-ui, sans-serif';
+  g.fillStyle = '#ffc84d';
+  g.fillText('HALCÓN-1 · AIR UNIT', 200, 134);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
@@ -27,11 +62,11 @@ export class HelicopterAI {
     this.mesh.visible = false;
     this.scene.add(this.mesh);
 
-    // Glowing ground spotlight pool ring beneath target
+    // Focused ground spotlight pool ring beneath target (tighter radius)
     this.groundPool = new THREE.Mesh(
-      new THREE.PlaneGeometry(16, 16),
+      new THREE.PlaneGeometry(10.5, 10.5),
       new THREE.MeshBasicMaterial({
-        map: getRadialGlowTexture('rgba(255,248,215,0.65)', 'rgba(255,232,165,0.22)', 'rgba(0,0,0,0)'),
+        map: getRadialGlowTexture('rgba(255,248,215,0.62)', 'rgba(255,232,165,0.18)', 'rgba(0,0,0,0)'),
         transparent: true,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
@@ -47,116 +82,201 @@ export class HelicopterAI {
 
   _buildHeliMesh() {
     const g = new THREE.Group();
-    const darkNavy = new THREE.MeshStandardMaterial({ color: 0x162238, roughness: 0.32, metalness: 0.6 });
-    const whiteTrim = new THREE.MeshStandardMaterial({ color: 0xf2f6ff, roughness: 0.3, metalness: 0.35 });
-    const goldAccent = new THREE.MeshStandardMaterial({ color: 0xffc44d, roughness: 0.25, metalness: 0.7 });
-    const glassMat = new THREE.MeshStandardMaterial({ color: 0x2b5d85, roughness: 0.08, metalness: 0.92 });
-    const metalMat = new THREE.MeshStandardMaterial({ color: 0x242c3a, roughness: 0.4, metalness: 0.8 });
+    const darkNavy = new THREE.MeshStandardMaterial({ color: 0x15284a, roughness: 0.3, metalness: 0.55 });
+    const whiteBody = new THREE.MeshStandardMaterial({ color: 0xf4f7ff, roughness: 0.26, metalness: 0.32 });
+    const coralAccent = new THREE.MeshStandardMaterial({ color: 0xff4757, roughness: 0.28, metalness: 0.35 });
+    const goldAccent = new THREE.MeshStandardMaterial({ color: 0xffc84d, roughness: 0.22, metalness: 0.72 });
+    const glassMat = new THREE.MeshStandardMaterial({
+      color: 0x3b96c8, emissive: 0x144566, emissiveIntensity: 0.55, roughness: 0.08, metalness: 0.88,
+    });
+    const cockpitGlowMat = new THREE.MeshBasicMaterial({ color: 0x7ef2ff });
+    const metalMat = new THREE.MeshStandardMaterial({ color: 0x384354, roughness: 0.35, metalness: 0.82 });
+    const liveryTex = createHeliSideLiveryTexture();
+    const liveryMat = new THREE.MeshStandardMaterial({ map: liveryTex, roughness: 0.28, metalness: 0.3 });
 
-    // Sculpted fuselage cabin
-    const body = new THREE.Mesh(new THREE.BoxGeometry(2.5, 2.05, 5.4), darkNavy);
-    body.position.set(0, 0.1, 0);
-    g.add(body);
+    // Main sculpted two-tone white/navy fuselage cabin with side livery panels
+    const bodyUpper = new THREE.Mesh(
+      new THREE.BoxGeometry(2.65, 1.35, 5.5),
+      [liveryMat, liveryMat, whiteBody, darkNavy, whiteBody, whiteBody]
+    );
+    bodyUpper.position.set(0, 0.38, 0);
+    bodyUpper.castShadow = true;
+    g.add(bodyUpper);
 
-    // Tapered upper turbine cowling
-    const cowl = new THREE.Mesh(new THREE.BoxGeometry(1.75, 0.72, 4.2), darkNavy);
+    const bodyLower = new THREE.Mesh(new THREE.BoxGeometry(2.58, 0.88, 5.3), darkNavy);
+    bodyLower.position.set(0, -0.68, 0.05);
+    g.add(bodyLower);
+
+    // Bold coral-red & gold fuselage accent stripes wrapping fuselage
+    const coralBand = new THREE.Mesh(new THREE.BoxGeometry(2.72, 0.22, 5.56), coralAccent);
+    coralBand.position.set(0, -0.18, 0.02);
+    const goldBand = new THREE.Mesh(new THREE.BoxGeometry(2.74, 0.12, 5.56), goldAccent);
+    goldBand.position.set(0, -0.35, 0.02);
+    g.add(coralBand, goldBand);
+
+    // Sculpted upper twin-turbine cowling & exhaust ducts
+    const cowl = new THREE.Mesh(new THREE.BoxGeometry(1.75, 0.78, 4.1), whiteBody);
     cowl.position.set(0, 1.38, -0.35);
-    g.add(cowl);
+    const cowlStripe = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.16, 4.14), darkNavy);
+    cowlStripe.position.set(0, 1.15, -0.35);
+    g.add(cowl, cowlStripe);
 
-    // Angled sleek glass cockpit canopy
-    const noseUpper = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.35, 2.4), glassMat);
-    noseUpper.position.set(0, 0.12, 3.2);
-    noseUpper.rotation.x = 0.38;
-    const noseChin = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.82, 2.2), darkNavy);
-    noseChin.position.set(0, -0.62, 3.1);
-    noseChin.rotation.x = -0.18;
-    g.add(noseUpper, noseChin);
+    for (const ex of [-0.58, 0.58]) {
+      const exhaust = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.24, 1.0, 8), metalMat);
+      exhaust.rotation.x = Math.PI / 2;
+      exhaust.position.set(ex, 1.48, -2.35);
+      g.add(exhaust);
+    }
 
-    // Side livery stripes (CDPD white + gold trim)
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.56, 0.38, 4.9), whiteTrim);
-    stripe.position.set(0, -0.28, 0.1);
-    const goldLine = new THREE.Mesh(new THREE.BoxGeometry(2.58, 0.11, 4.8), goldAccent);
-    goldLine.position.set(0, -0.02, 0.1);
-    g.add(stripe, goldLine);
+    // Sleek angled tinted glass cockpit canopy with subtle interior console glow & struts
+    const noseUpper = new THREE.Mesh(new THREE.BoxGeometry(2.26, 1.38, 2.5), glassMat);
+    noseUpper.position.set(0, 0.24, 3.35);
+    noseUpper.rotation.x = 0.44;
+    const canopyCenterRib = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.4, 2.54), whiteBody);
+    canopyCenterRib.position.copy(noseUpper.position);
+    canopyCenterRib.rotation.copy(noseUpper.rotation);
+    const cockpitDash = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.34, 0.9), cockpitGlowMat);
+    cockpitDash.position.set(0, -0.02, 3.05);
+    const noseChin = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.85, 2.4), whiteBody);
+    noseChin.position.set(0, -0.62, 3.25);
+    noseChin.rotation.x = -0.16;
+    const noseTip = new THREE.Mesh(new THREE.BoxGeometry(1.85, 0.62, 0.9), darkNavy);
+    noseTip.position.set(0, -0.52, 4.35);
+    g.add(noseUpper, canopyCenterRib, cockpitDash, noseChin, noseTip);
 
-    // Tapered tail boom & stabilizers
-    const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.62, 7.6, 8), darkNavy);
+    // Tapered white & navy tail boom with coral/gold tail bands & stabilizers
+    const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.68, 7.8, 10), whiteBody);
     boom.rotation.x = Math.PI / 2;
-    boom.position.set(0, 0.45, -6.1);
-    g.add(boom);
+    boom.position.set(0, 0.42, -6.3);
+    const boomBandR = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.48, 0.72, 10), coralAccent);
+    boomBandR.rotation.x = Math.PI / 2;
+    boomBandR.position.set(0, 0.42, -7.2);
+    const boomBandG = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.52, 0.34, 10), goldAccent);
+    boomBandG.rotation.x = Math.PI / 2;
+    boomBandG.position.set(0, 0.42, -6.72);
+    g.add(boom, boomBandR, boomBandG);
 
-    const hStab = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.12, 0.85), whiteTrim);
-    hStab.position.set(0, 0.48, -7.8);
-    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.22, 2.5, 1.35), whiteTrim);
-    fin.position.set(0, 1.15, -9.6);
-    fin.rotation.x = -0.24;
-    g.add(hStab, fin);
+    const hStab = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.14, 0.92), whiteBody);
+    hStab.position.set(0, 0.48, -7.9);
+    for (const sx of [-1.75, 1.75]) {
+      const endPlate = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.72, 0.96), coralAccent);
+      endPlate.position.set(sx, 0.56, -7.9);
+      g.add(endPlate);
+    }
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.24, 2.75, 1.48), darkNavy);
+    fin.position.set(0, 1.28, -9.8);
+    fin.rotation.x = -0.26;
+    const finTrim = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.36, 1.42), goldAccent);
+    finTrim.position.set(0, 2.2, -10.05);
+    finTrim.rotation.x = -0.26;
+    g.add(hStab, fin, finTrim);
 
-    // Landing skids + diagonal struts
-    for (const sx of [-1.35, 1.35]) {
-      const skid = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 5.8, 8), metalMat);
+    // Twin tubular metal landing skids with curved front tips & crossbars
+    for (const sx of [-1.45, 1.45]) {
+      const skid = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 6.4, 8), metalMat);
       skid.rotation.x = Math.PI / 2;
-      skid.position.set(sx, -1.72, 0.5);
-      g.add(skid);
-      for (const sz of [-1.2, 1.8]) {
-        const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1.25, 6), metalMat);
-        strut.position.set(sx * 0.84, -1.25, sz);
-        strut.rotation.z = sx > 0 ? 0.35 : -0.35;
+      skid.position.set(sx, -1.82, 0.55);
+      const skidTip = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.85, 8), metalMat);
+      skidTip.rotation.x = Math.PI / 2 - 0.58;
+      skidTip.position.set(sx, -1.62, 3.95);
+      g.add(skid, skidTip);
+      for (const sz of [-1.35, 1.95]) {
+        const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 1.38, 6), metalMat);
+        strut.position.set(sx * 0.84, -1.32, sz);
+        strut.rotation.z = sx > 0 ? 0.32 : -0.32;
         g.add(strut);
       }
     }
+    for (const sz of [-1.35, 1.95]) {
+      const cross = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 2.8, 6), metalMat);
+      cross.rotation.z = Math.PI / 2;
+      cross.position.set(0, -1.38, sz);
+      g.add(cross);
+    }
 
-    // Main rotor mast + 4 spinning blades + soft translucent motion disc
-    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 0.7, 8), metalMat);
-    mast.position.set(0, 1.85, 0.15);
-    g.add(mast);
+    // Raised rotor mast + hub + 4 detailed main rotor blades with safety tips + translucent blur disc
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.24, 0.92, 10), metalMat);
+    mast.position.set(0, 2.02, 0.15);
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 0.26, 12), goldAccent);
+    hub.position.set(0, 2.48, 0.15);
+    g.add(mast, hub);
 
     const mainRotor = new THREE.Group();
-    mainRotor.position.set(0, 2.15, 0.15);
-    const bladeMat = new THREE.MeshStandardMaterial({ color: 0x1a1f28 });
-    const b1 = new THREE.Mesh(new THREE.BoxGeometry(13.6, 0.08, 0.34), bladeMat);
-    const b2 = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.08, 13.6), bladeMat);
+    mainRotor.position.set(0, 2.52, 0.15);
+    const bladeMat = new THREE.MeshStandardMaterial({ color: 0x1b2230, roughness: 0.4, metalness: 0.6 });
+    const tipMat = new THREE.MeshBasicMaterial({ color: 0xffc84d });
+    for (let i = 0; i < 4; i++) {
+      const bWrap = new THREE.Group();
+      bWrap.rotation.y = (i / 4) * Math.PI * 2;
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(7.2, 0.07, 0.34), bladeMat);
+      blade.position.x = 3.6;
+      const tip = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.075, 0.35), tipMat);
+      tip.position.x = 7.0;
+      bWrap.add(blade, tip);
+      mainRotor.add(bWrap);
+    }
     const disc = new THREE.Mesh(
-      new THREE.CircleGeometry(6.8, 28),
-      new THREE.MeshBasicMaterial({ color: 0xb7cde6, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false })
+      new THREE.RingGeometry(1.1, 7.25, 36),
+      new THREE.MeshBasicMaterial({ color: 0xd8e8fa, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false })
     );
     disc.rotation.x = -Math.PI / 2;
-    mainRotor.add(b1, b2, disc);
+    mainRotor.add(disc);
     g.add(mainRotor);
 
-    // Tail rotor
-    const tailRotor = new THREE.Mesh(new THREE.BoxGeometry(0.1, 2.2, 0.22), whiteTrim);
-    tailRotor.position.set(0.38, 1.15, -9.6);
+    // 4-blade spinning tail rotor with coral tips
+    const tailRotor = new THREE.Group();
+    tailRotor.position.set(0.4, 1.35, -9.85);
+    const tr1 = new THREE.Mesh(new THREE.BoxGeometry(0.08, 2.5, 0.22), whiteBody);
+    const tr2 = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.22, 2.5), coralAccent);
+    tailRotor.add(tr1, tr2);
     g.add(tailRotor);
 
-    // Belly red/blue flashing strobe + red/green nav lights
-    const strobe = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: getRadialGlowTexture('#ffffff', 'rgba(255,40,75,0.92)'),
+    // Flashing Red & Blue Fuselage Strobes (crisp focused glows)
+    const strobeRed = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: getRadialGlowTexture('#ffffff', 'rgba(255,44,78,0.9)', 'rgba(0,0,0,0)'),
       transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
     }));
-    strobe.scale.set(2.4, 2.4, 1);
-    strobe.position.set(0, -1.18, -1.8);
-    g.add(strobe);
+    strobeRed.scale.set(2.1, 2.1, 1);
+    strobeRed.position.set(-1.35, -0.82, 0.4);
 
-    // Volumetric Additive Gradient Spotlight Cone!
+    const strobeBlue = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: getRadialGlowTexture('#ffffff', 'rgba(54,162,255,0.9)', 'rgba(0,0,0,0)'),
+      transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    strobeBlue.scale.set(2.1, 2.1, 1);
+    strobeBlue.position.set(1.35, -0.82, 0.4);
+
+    const tailBeacon = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: getRadialGlowTexture('#ffffff', 'rgba(255,54,78,0.88)', 'rgba(0,0,0,0)'),
+      transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    tailBeacon.scale.set(1.75, 1.75, 1);
+    tailBeacon.position.set(0, 2.68, -10.15);
+    g.add(strobeRed, strobeBlue, tailBeacon);
+
+    // Under-nose Searchlight & FLIR Gimbal Turret casting focused volumetric spotlight cone
+    const gimbalHousing = new THREE.Mesh(new THREE.SphereGeometry(0.42, 12, 10), metalMat);
+    gimbalHousing.position.set(0, -1.22, 3.65);
+    g.add(gimbalHousing);
+
     const spotOrigin = new THREE.Group();
-    spotOrigin.position.set(0, -1.15, 3.6);
+    spotOrigin.position.set(0, -1.28, 3.72);
 
     const lampFlare = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: getRadialGlowTexture('#ffffff', 'rgba(255,244,196,0.92)'),
+      map: getRadialGlowTexture('#ffffff', 'rgba(255,244,196,0.9)', 'rgba(0,0,0,0)'),
       transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
     }));
-    lampFlare.scale.set(3.4, 3.4, 1);
+    lampFlare.scale.set(2.4, 2.4, 1);
     spotOrigin.add(lampFlare);
 
     const coneHeight = 46;
-    const coneGeo = new THREE.ConeGeometry(7.2, coneHeight, 24, 1, true);
+    const coneGeo = new THREE.ConeGeometry(4.4, coneHeight, 24, 1, true);
     coneGeo.translate(0, -coneHeight / 2, 0);
     const coneMat = new THREE.MeshBasicMaterial({
       map: createSpotlightBeamTexture(),
       color: 0xfff3c8,
       transparent: true,
-      opacity: 0.44,
+      opacity: 0.42,
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
       depthWrite: false,
@@ -164,22 +284,27 @@ export class HelicopterAI {
     const cone = new THREE.Mesh(coneGeo, coneMat);
     spotOrigin.add(cone);
 
-    const spotLight = new THREE.SpotLight(0xfff1c4, 95, 95, 0.34, 0.55, 1.2);
+    const spotLight = new THREE.SpotLight(0xfff1c4, 65, 68, 0.24, 0.42, 1.8);
     spotLight.position.set(0, 0, 0);
     spotOrigin.add(spotLight);
     spotOrigin.add(spotLight.target);
     spotLight.target.position.set(0, -30, 0);
 
     g.add(spotOrigin);
+    g.scale.setScalar(1.16);
 
-    g.userData = { mainRotor, tailRotor, strobe, spotOrigin, cone };
+    g.userData = { mainRotor, tailRotor, strobeRed, strobeBlue, tailBeacon, spotOrigin, cone };
     return g;
   }
 
-  placeForShot(pos, targetPos) {
+  placeForShot(pos, targetPos, bankAngle = 0.14) {
     this.mesh.visible = true;
     this.mesh.position.copy(pos);
-    this.mesh.lookAt(targetPos.x, pos.y - 3, targetPos.z);
+    this.mesh.lookAt(targetPos.x, pos.y - 4.2, targetPos.z);
+    this.mesh.rotateZ(bankAngle);
+    this.mesh.userData.mainRotor.rotation.y = 0.42;
+    this.mesh.userData.strobeRed.visible = true;
+    this.mesh.userData.strobeBlue.visible = true;
     this.mesh.updateMatrixWorld(true);
     this._aimSpotlight(targetPos);
     this.groundPool.visible = true;
@@ -205,17 +330,20 @@ export class HelicopterAI {
     const radius = 34;
     const desiredX = targetPos.x + Math.cos(this.orbitAngle) * radius;
     const desiredZ = targetPos.z + Math.sin(this.orbitAngle) * radius;
-    const desiredY = 26 + Math.sin(elapsed * 1.4) * 2.2;
+    const desiredY = 25 + Math.sin(elapsed * 1.4) * 2.0;
 
     this.mesh.position.x = THREE.MathUtils.lerp(this.mesh.position.x, desiredX, dt * 1.6);
     this.mesh.position.z = THREE.MathUtils.lerp(this.mesh.position.z, desiredZ, dt * 1.6);
     this.mesh.position.y = THREE.MathUtils.lerp(this.mesh.position.y, desiredY, dt * 2.0);
     this.mesh.lookAt(targetPos.x, this.mesh.position.y - 4, targetPos.z);
 
-    const { mainRotor, tailRotor, strobe, cone } = this.mesh.userData;
+    const { mainRotor, tailRotor, strobeRed, strobeBlue, tailBeacon, cone } = this.mesh.userData;
     mainRotor.rotation.y += dt * 28;
     tailRotor.rotation.x += dt * 36;
-    strobe.visible = Math.sin(elapsed * 14) > 0;
+    const pulse = Math.sin(elapsed * 14) > 0;
+    strobeRed.visible = pulse;
+    strobeBlue.visible = !pulse;
+    tailBeacon.visible = Math.sin(elapsed * 8) > -0.2;
 
     const jammed = state.signalJamTimer > 0;
     cone.visible = !jammed;

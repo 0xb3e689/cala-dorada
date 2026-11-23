@@ -93,16 +93,18 @@ export class MissionDirector {
   _completeMission(state, m, combat, police, audio) {
     const used = m.timeLimit - state.missionTimer;
     const medal = used <= m.medalTarget ? 'GOLD' : used <= m.medalTarget * 1.3 ? 'SILVER' : 'BRONZE';
+    const warehouseBonus = state.ownedProperties?.has('cenit-warehouse') ? 1.15 : 1.0;
+    const payout = Math.round(m.cash * warehouseBonus);
     state.completedMissions[m.id] = medal;
-    state.cash += m.cash;
-    state.careerStats.cashEarned += m.cash;
+    state.cash += payout;
+    state.careerStats.cashEarned += payout;
     state.rp += m.rp;
 
     const dKey = Object.keys(state.districtStanding).find((k) => m.district.toLowerCase().includes(k.split('-')[0]));
     if (dKey) state.districtStanding[dKey] = Math.min(100, state.districtStanding[dKey] + 10);
 
     state.toast = {
-      text: `MISSION COMPLETE (${medal}) · +$${m.cash.toLocaleString()} · +${m.rp} RP`,
+      text: `MISSION COMPLETE (${medal}) · +$${payout.toLocaleString()} · +${m.rp} RP`,
       timer: 5.0,
     };
     if (audio) audio.playUiBeep(880);

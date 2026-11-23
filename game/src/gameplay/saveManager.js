@@ -2,13 +2,13 @@
 
 import { serializeStateForSave, applySavedData } from '../core/gameState.js';
 
-const STORAGE_KEY = 'cala_dorada_saves_v2';
+const STORAGE_KEY = 'cala_dorada_saves_v3';
 
 const DEFAULT_SLOTS = {
   1: {
     savedAt: '18:42',
     savedDate: 'Today',
-    completion: 68.7,
+    completion: 68.1,
     act: 'Act II',
     missionTitle: 'Bridge Toll Takedown',
     districtName: 'Paseo Dorado',
@@ -18,6 +18,9 @@ const DEFAULT_SLOTS = {
     activeMissionId: 'm5',
     missionStageIdx: 2,
     completedMissions: { m1: 'GOLD', m2: 'GOLD', m3: 'SILVER', m4: 'GOLD' },
+    ownedProperties: ['dantes-loft', 'rafas-garage', 'el-taller', 'solsticio-club', 'cenit-warehouse'],
+    vaultBalance: 14800,
+    vehicleUpgrades: { nitroLevel: 2, armorLevel: 2 },
     completedRaces: ['race-1', 'race-2', 'race-3', 'race-4'],
     completedStunts: ['stunt-1', 'stunt-2', 'stunt-3', 'stunt-4', 'stunt-5', 'stunt-6', 'stunt-7'],
     collectedShells: [
@@ -35,7 +38,7 @@ const DEFAULT_SLOTS = {
   2: {
     savedAt: '21:15',
     savedDate: 'Yesterday',
-    completion: 31.2,
+    completion: 31.4,
     act: 'Act I',
     missionTitle: 'Lantern Ledger',
     districtName: 'Mercado Nocturno',
@@ -45,6 +48,9 @@ const DEFAULT_SLOTS = {
     activeMissionId: 'm3',
     missionStageIdx: 1,
     completedMissions: { m1: 'GOLD', m2: 'SILVER' },
+    ownedProperties: ['dantes-loft', 'rafas-garage', 'el-taller'],
+    vaultBalance: 4200,
+    vehicleUpgrades: { nitroLevel: 1, armorLevel: 1 },
     completedRaces: ['race-1'],
     completedStunts: ['stunt-1', 'stunt-2'],
     collectedShells: ['sh1', 'sh2', 'sh3', 'sh7', 'sh8'],

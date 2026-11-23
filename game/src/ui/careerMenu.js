@@ -1,11 +1,11 @@
-// ESC / M Pause & Career Dossier menu with tabs, completion donut, medal strip, interactive city map, stats, and 3 save slots.
+// ESC / M Pause & Career Dossier menu with tabs (including PROPERTIES), completion donut, medal strip, interactive city map, empire income stats, and 3 save slots.
 
-import { DISTRICTS, MISSIONS, CREW } from '../core/config.js';
-import { computeCompletionPercent, getRankInfo } from '../core/gameState.js';
-import { ROAD_X, ROAD_Z, LANDMARKS, SHOPS, STREET_RACES, computeGpsPath } from '../world/cityPlan.js';
+import { DISTRICTS, MISSIONS, CREW, PROPERTIES } from '../core/config.js';
+import { computeCompletionPercent, getRankInfo, getEmpireIncomePerHour } from '../core/gameState.js';
+import { ROAD_X, ROAD_Z, LANDMARKS, STREET_RACES, computeGpsPath } from '../world/cityPlan.js';
 import { renderPortraitSvg } from './portraitArt.js';
 
-const TABS = ['MAP', 'STORY', 'STATS', 'CREW', 'SETTINGS', 'CONTROLS', 'SAVE'];
+const TABS = ['MAP', 'PROPERTIES', 'STORY', 'STATS', 'CREW', 'SETTINGS', 'CONTROLS', 'SAVE'];
 
 export class CareerMenu {
   constructor(callbacks) {
@@ -26,6 +26,7 @@ export class CareerMenu {
   render(state, playerPos, missionTarget, saveManager) {
     const pct = computeCompletionPercent(state);
     const rank = getRankInfo(state.rp);
+    const empireHr = getEmpireIncomePerHour(state);
     const tabsHtml = TABS.map((t) =>
       `<button class="tab-btn ${t === this.activeTab ? 'active' : ''}" data-tab="${t}">${t}</button>`
     ).join('');
@@ -42,7 +43,19 @@ export class CareerMenu {
 
     let bodyHtml = '';
     if (this.activeTab === 'MAP' || this.activeTab === 'STATS' || this.activeTab === 'SAVE') {
-      bodyHtml = this._renderUnifiedOverview(state, pct, rank, saveManager);
+      bodyHtml = this._renderUnifiedOverview(state, pct, rank, empireHr, saveManager);
+    } else if (this.activeTab === 'PROPERTIES') {
+      bodyHtml = `<div class="glass-card full-tab-panel">${PROPERTIES.map((p) => {
+        const owned = state.ownedProperties?.has(p.id);
+        return `<div class="info-card" style="border-color:${owned ? p.color : 'rgba(255,255,255,0.14)'}">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+            <h3 style="margin:0;color:${p.color}">${p.name}</h3>
+            <span style="font-size:10px;font-weight:900;padding:2px 7px;border-radius:4px;background:${owned ? 'rgba(66,227,140,0.2)' : 'rgba(255,190,85,0.18)'};color:${owned ? '#42e38c' : '#ffbe55'}">${owned ? 'OWNED' : `$${p.price.toLocaleString()}`}</span>
+          </div>
+          <p><strong>${p.districtLabel} · ${p.badge}</strong>${p.incomePerHr > 0 ? ` · <span style="color:#42e38c">$${p.incomePerHr.toLocaleString()}/hr</span>` : ''}<br>${p.perks}</p>
+          <div style="margin-top:8px"><button class="btn-xs alt" data-prop-gps="${p.id}">SET GPS WAYPOINT</button></div>
+        </div>`;
+      }).join('')}</div>`;
     } else if (this.activeTab === 'STORY') {
       bodyHtml = `<div class="glass-card full-tab-panel">${MISSIONS.map((m) => {
         const medal = state.completedMissions[m.id];
@@ -66,7 +79,7 @@ export class CareerMenu {
       bodyHtml = `<div class="glass-card full-tab-panel">
         <div class="info-card"><h3>Driving Controls</h3><p><b>W/A/S/D or Arrows</b>: Drive & Steer<br><b>Space</b>: Handbrake Drift<br><b>Shift</b>: Nitro Boost<br><b>F</b>: Enter / Exit Vehicle<br><b>V</b>: Cycle Camera Mode<br><b>R</b>: Switch Radio Station</p></div>
         <div class="info-card"><h3>On-Foot & Combat</h3><p><b>W/A/S/D</b>: Move · <b>Shift</b>: Sprint · <b>Space</b>: Jump<br><b>Left Click</b>: Fire Weapon / Melee<br><b>Right Drag</b>: Aim Camera<br><b>1 – 6</b>: Select Weapon Slot</p></div>
-        <div class="info-card"><h3>Crew & City Actions</h3><p><b>Z</b>: Nadia Plate Swap (-2 Stars)<br><b>X</b>: Toma Field Repair & Nitro<br><b>C</b>: Sora Signal Jam (14s)<br><b>E</b>: Enter Garage / Gunsmith / Start Race<br><b>ESC / M</b>: Syndicate Dossier & Map</p></div>
+        <div class="info-card"><h3>Crew & Properties</h3><p><b>Z</b>: Nadia Plate Swap (-2 Stars)<br><b>X</b>: Toma Field Repair & Nitro<br><b>C</b>: Sora Signal Jam (14s)<br><b>E</b>: Buy / Enter Property, Shop, or Race<br><b>ESC / M</b>: Syndicate Dossier & Map</p></div>
       </div>`;
     } else if (this.activeTab === 'SETTINGS') {
       bodyHtml = `<div class="glass-card full-tab-panel">
@@ -89,6 +102,17 @@ export class CareerMenu {
     });
     const resumeBtn = this.el.querySelector('#btn-resume');
     if (resumeBtn) resumeBtn.addEventListener('click', () => this.cb.onResume());
+
+    this.el.querySelectorAll('[data-prop-gps]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const prop = PROPERTIES.find((p) => p.id === btn.dataset.propGps);
+        if (prop) {
+          state.customWaypoint = { x: prop.x, z: prop.z, label: prop.shortName };
+          this.activeTab = 'MAP';
+          this.render(state, playerPos, missionTarget, saveManager);
+        }
+      });
+    });
 
     this.el.querySelectorAll('[data-save]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -128,12 +152,13 @@ export class CareerMenu {
     }
   }
 
-  _renderUnifiedOverview(state, pct, rank, saveManager) {
-    const r = 36;
+  _renderUnifiedOverview(state, pct, rank, empireHr, saveManager) {
+    const r = 34;
     const circ = 2 * Math.PI * r;
     const offset = circ * (1 - pct / 100);
 
     const mDone = Object.keys(state.completedMissions).length;
+    const pDone = state.ownedProperties ? state.ownedProperties.size : 0;
     const rDone = state.completedRaces.size;
     const sDone = state.completedStunts.size;
     const gDone = state.collectedShells.size;
@@ -141,6 +166,7 @@ export class CareerMenu {
 
     const checks = [
       { label: 'Story Missions', val: `${mDone}/8`, pct: (mDone / 8) * 100, col: '#ffbe55' },
+      { label: 'Properties Owned', val: `${pDone}/${PROPERTIES.length}`, pct: (pDone / PROPERTIES.length) * 100, col: '#42e38c' },
       { label: 'Street Races', val: `${rDone}/4`, pct: (rDone / 4) * 100, col: '#34e0c8' },
       { label: 'Stunt Jumps', val: `${sDone}/8`, pct: (sDone / 8) * 100, col: '#ff6b4a' },
       { label: 'Golden Shells', val: `${gDone}/20`, pct: (gDone / 20) * 100, col: '#ffd24d' },
@@ -172,16 +198,16 @@ export class CareerMenu {
 
     return `
     <div class="career-grid">
-      <!-- LEFT COLUMN: Completion Donut + Checklist + Mission Medals -->
+      <!-- LEFT COLUMN: Completion Donut + Checklist (incl. Properties Owned) + Mission Medals -->
       <div class="career-col">
         <div class="glass-card panel-box">
           <div class="panel-hdr"><span>CAREER PROGRESS</span><span>GOLD COAST</span></div>
           <div class="donut-wrap">
-            <svg class="donut-svg" viewBox="0 0 92 92">
-              <circle cx="46" cy="46" r="${r}" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="9"/>
-              <circle cx="46" cy="46" r="${r}" fill="none" stroke="url(#dgrad)" stroke-width="9"
+            <svg class="donut-svg" viewBox="0 0 84 84">
+              <circle cx="42" cy="42" r="${r}" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="8"/>
+              <circle cx="42" cy="42" r="${r}" fill="none" stroke="url(#dgrad)" stroke-width="8"
                 stroke-dasharray="${circ}" stroke-dashoffset="${offset}" stroke-linecap="round"
-                transform="rotate(-90 46 46)"/>
+                transform="rotate(-90 42 42)"/>
               <defs>
                 <linearGradient id="dgrad" x1="0" y1="0" x2="1" y2="1">
                   <stop offset="0%" stop-color="#34e0c8"/><stop offset="100%" stop-color="#ffbe55"/>
@@ -191,7 +217,7 @@ export class CareerMenu {
             <div>
               <div class="donut-big">${pct.toFixed(1)}%</div>
               <div class="donut-lbl">COMPLETE</div>
-              <div style="font-size:10px;color:#b4bfd4;margin-top:3px">Act II · Syndicate Rising</div>
+              <div style="font-size:10px;color:#b4bfd4;margin-top:2px">Act II · Syndicate Rising</div>
             </div>
           </div>
           <div class="check-list">
@@ -209,7 +235,7 @@ export class CareerMenu {
         </div>
       </div>
 
-      <!-- CENTER COLUMN: Interactive Full-City District Map -->
+      <!-- CENTER COLUMN: Interactive Full-City District & Property Map -->
       <div class="glass-card map-panel">
         <div class="panel-hdr">
           <span>CALA DORADA · INTERACTIVE TACTICAL MAP</span>
@@ -219,18 +245,19 @@ export class CareerMenu {
         <div class="map-legend">
           <span><span class="leg-dot" style="background:#ffffff"></span>Player</span>
           <span><span class="leg-dot" style="background:#ffbe55"></span>Story Mission</span>
-          <span><span class="leg-dot" style="background:#e85aff"></span>GPS Waypoint</span>
-          <span><span class="leg-dot" style="background:#34e0c8"></span>Garage / Races</span>
-          <span><span class="leg-dot" style="background:#ff6b4a"></span>Gunsmith</span>
+          <span><span class="leg-dot" style="background:#e85aff"></span>GPS Pin</span>
+          <span><span class="leg-dot" style="background:#42e38c"></span>Owned Property</span>
+          <span><span class="leg-dot" style="background:transparent;border:2px solid #ffbe55"></span>For Sale</span>
+          <span><span class="leg-dot" style="background:#34e0c8"></span>Races</span>
           <span><span class="leg-dot" style="background:#e04f44"></span>Puente del Sol</span>
         </div>
       </div>
 
-      <!-- RIGHT COLUMN: Rank/RP + Career Stats + Save Slots -->
+      <!-- RIGHT COLUMN: Rank/RP + Career & Empire Income Stats + Save Slots -->
       <div class="career-col">
         <div class="glass-card panel-box">
           <div class="panel-hdr"><span>SYNDICATE RANK</span><span>RANK ${rank.rank}</span></div>
-          <div style="font-size:16px;font-weight:900;color:#fff">${rank.title}</div>
+          <div style="font-size:15px;font-weight:900;color:#fff">${rank.title}</div>
           <div class="bar-track"><div class="bar-fill" style="width:${Math.round(rank.progress * 100)}%;background:linear-gradient(90deg,#ff7846,#ffbe55)"></div></div>
           <div style="font-size:10px;color:#b4bfd4;display:flex;justify-content:space-between">
             <span>${rank.rp.toLocaleString()} RP</span><span>NEXT: ${rank.nextRp.toLocaleString()} RP</span>
@@ -238,12 +265,12 @@ export class CareerMenu {
         </div>
 
         <div class="glass-card panel-box">
-          <div class="panel-hdr"><span>CAREER STATS</span><span>LIVE</span></div>
+          <div class="panel-hdr"><span>CAREER & EMPIRE</span><span style="color:#42e38c">$${empireHr.toLocaleString()}/HR</span></div>
           <div class="stats-grid">
-            <div class="stat-tile"><div class="stat-k">Cash Earned</div><div class="stat-v" style="color:#42e38c">$${state.careerStats.cashEarned.toLocaleString()}</div></div>
+            <div class="stat-tile"><div class="stat-k">Empire Income</div><div class="stat-v" style="color:#42e38c">$${empireHr.toLocaleString()}/hr</div></div>
+            <div class="stat-tile"><div class="stat-k">Cash Earned</div><div class="stat-v" style="color:#ffd24d">$${state.careerStats.cashEarned.toLocaleString()}</div></div>
             <div class="stat-tile"><div class="stat-k">Pursuits Evaded</div><div class="stat-v">${state.careerStats.pursuitsEvaded}</div></div>
             <div class="stat-tile"><div class="stat-k">Top Speed</div><div class="stat-v">${state.careerStats.topSpeedMph} MPH</div></div>
-            <div class="stat-tile"><div class="stat-k">Stunts Landed</div><div class="stat-v">${state.careerStats.stuntsLanded}</div></div>
             <div class="stat-tile"><div class="stat-k">Takedowns</div><div class="stat-v">${state.careerStats.takedowns}</div></div>
             <div class="stat-tile"><div class="stat-k">Playtime</div><div class="stat-v">${hrs}h ${mins}m</div></div>
           </div>
@@ -264,7 +291,7 @@ export class CareerMenu {
     const mapX = (wx) => ((wx + 470) / 950) * W;
     const mapY = (wz) => ((wz + 455) / 760) * H;
 
-    // Deep coastal ocean gradient with bathymetry contour bands
+    // Deep coastal ocean gradient
     const seaGrad = ctx.createLinearGradient(0, 0, 0, H);
     seaGrad.addColorStop(0, '#071b2b');
     seaGrad.addColorStop(0.75, '#0b2d42');
@@ -310,7 +337,7 @@ export class CareerMenu {
     ctx.closePath();
     ctx.fill();
 
-    // Golden beach shoreline curves (West Paseo Dorado + East Bahia Esmeralda)
+    // Golden beach shoreline curves
     ctx.fillStyle = '#b8965d';
     ctx.beginPath();
     ctx.moveTo(mapX(-450), mapY(224));
@@ -328,7 +355,7 @@ export class CareerMenu {
     ctx.closePath();
     ctx.fill();
 
-    // Marina wooden piers extending into Bahia Esmeralda cove
+    // Marina wooden piers
     ctx.strokeStyle = '#c49d68';
     ctx.lineWidth = 3;
     for (const px of [215, 245, 275]) {
@@ -338,7 +365,7 @@ export class CareerMenu {
       ctx.stroke();
     }
 
-    // 7 Color-Coded Districts (soft fills & crisp dashed borders)
+    // 7 Color-Coded Districts
     for (const d of DISTRICTS) {
       const x1 = mapX(d.bounds.x1);
       const y1 = mapY(d.bounds.z1);
@@ -353,12 +380,12 @@ export class CareerMenu {
       ctx.setLineDash([]);
     }
 
-    // Greenbelt parks in Villas del Cabo & Mirador Plaza
+    // Greenbelt parks
     ctx.fillStyle = 'rgba(66, 227, 140, 0.14)';
     ctx.fillRect(mapX(-340), mapY(-370), mapX(-215) - mapX(-340), mapY(-285) - mapY(-370));
     ctx.fillRect(mapX(-40), mapY(-35), mapX(40) - mapX(-40), mapY(35) - mapY(-35));
 
-    // Varied architectural building footprints for realistic tactical map depth
+    // Building footprints
     ctx.fillStyle = 'rgba(220, 234, 255, 0.08)';
     for (let bx = -390; bx <= 380; bx += 52) {
       for (let bz = -395; bz <= 165; bz += 52) {
@@ -369,7 +396,7 @@ export class CareerMenu {
       }
     }
 
-    // Road Grid (dark asphalt bed + subtle dashed centerlines)
+    // Road Grid
     ctx.strokeStyle = '#334257';
     ctx.lineWidth = 7.5;
     ctx.beginPath();
@@ -398,7 +425,7 @@ export class CareerMenu {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Iconic Red & Gold Puente del Sol Bridge Span + Twin Suspension Towers
+    // Puente del Sol Bridge Span
     ctx.strokeStyle = '#e0453b';
     ctx.lineWidth = 8.5;
     ctx.beginPath();
@@ -419,7 +446,7 @@ export class CareerMenu {
       ctx.strokeRect(mapX(tx) - 3.5, mapY(200) - 7, 7, 14);
     }
 
-    // Crisp District Labels with rounded dark backing pills & colored accent dots
+    // Crisp District Labels
     ctx.font = '800 9.5px "Avenir Next", system-ui, sans-serif';
     ctx.textAlign = 'center';
     for (const d of DISTRICTS) {
@@ -442,7 +469,7 @@ export class CareerMenu {
       ctx.fillText(label, cx + 3, cy + 1);
     }
 
-    // Glowing GPS Route Line (outer halo + bright core)
+    // Glowing GPS Route Line
     const goal = state.customWaypoint ?? missionTarget;
     if (goal) {
       const path = computeGpsPath(playerPos, goal);
@@ -469,41 +496,62 @@ export class CareerMenu {
     for (const r of STREET_RACES) {
       ctx.fillStyle = '#34e0c8';
       ctx.beginPath();
-      ctx.arc(mapX(r.start.x), mapY(r.start.z), 4.8, 0, Math.PI * 2);
+      ctx.arc(mapX(r.start.x), mapY(r.start.z), 4.5, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = '#091420';
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = 1.4;
       ctx.stroke();
     }
 
-    // Shops & Landmarks
-    for (const sh of SHOPS) {
-      const sx = mapX(sh.x);
-      const sy = mapY(sh.z);
-      ctx.fillStyle = sh.kind === 'garage' ? '#34e0c8' : sh.kind === 'gunsmith' ? '#ff6b4a' : '#ffbe55';
+    // 8 City Properties with Distinct House Markers (Green-Filled = Owned, Gold-Outlined = Purchasable)
+    for (const prop of PROPERTIES) {
+      const sx = mapX(prop.x);
+      const sy = mapY(prop.z);
+      const owned = state.ownedProperties?.has(prop.id);
+
+      ctx.save();
+      ctx.translate(sx, sy);
       ctx.beginPath();
-      ctx.roundRect(sx - 5.5, sy - 5.5, 11, 11, 2.5);
-      ctx.fill();
-      ctx.strokeStyle = '#090d16';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
+      ctx.moveTo(0, -7.2);
+      ctx.lineTo(6.8, -1.2);
+      ctx.lineTo(5.6, -1.2);
+      ctx.lineTo(5.6, 5.8);
+      ctx.lineTo(-5.6, 5.8);
+      ctx.lineTo(-5.6, -1.2);
+      ctx.lineTo(-6.8, -1.2);
+      ctx.closePath();
+
+      if (owned) {
+        ctx.fillStyle = '#42e38c';
+        ctx.fill();
+        ctx.strokeStyle = '#07140d';
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = 'rgba(14, 18, 28, 0.92)';
+        ctx.fill();
+        ctx.strokeStyle = '#ffbe55';
+        ctx.lineWidth = 2.0;
+        ctx.stroke();
+      }
+      ctx.restore();
     }
 
-    // Landmark pins
-    ctx.font = '800 9px "Avenir Next", system-ui, sans-serif';
+    // Landmark & Property Labels
+    ctx.font = '800 8.5px "Avenir Next", system-ui, sans-serif';
     ctx.fillStyle = '#ffe0a3';
     ctx.textAlign = 'center';
     for (const lm of LANDMARKS) {
       if (lm.type === 'bridge') {
         ctx.fillText(lm.name, mapX(lm.x), mapY(lm.z) - 12);
       } else if (lm.id === 'mirador-plaza' || lm.id === 'rafas-garage') {
-        ctx.fillText(lm.name, mapX(lm.x), mapY(lm.z) - 9);
+        ctx.fillText(lm.name, mapX(lm.x), mapY(lm.z) - 11);
       } else if (lm.id === 'hotel-solsticio') {
         ctx.fillText(lm.name, mapX(lm.x) - 24, mapY(lm.z) + 18);
       }
     }
 
-    // Mission Target Pin with halo ring
+    // Mission Target Pin
     if (missionTarget) {
       const mx = mapX(missionTarget.x);
       const my = mapY(missionTarget.z);
@@ -521,7 +569,7 @@ export class CareerMenu {
       ctx.stroke();
     }
 
-    // Custom Waypoint Pin with magenta pulse ring
+    // Custom Waypoint Pin
     if (state.customWaypoint) {
       const wx = mapX(state.customWaypoint.x);
       const wy = mapY(state.customWaypoint.z);
@@ -539,7 +587,7 @@ export class CareerMenu {
       ctx.stroke();
     }
 
-    // Player Marker with directional radar ring
+    // Player Marker
     const px = mapX(playerPos.x);
     const py = mapY(playerPos.z);
     ctx.strokeStyle = 'rgba(255, 107, 74, 0.55)';

@@ -1,6 +1,6 @@
 // Central game state: progression, rank/RP, district standing, career stats, wanted heat, and mission progress.
 
-import { DISTRICTS, WEAPONS, RANKS, MISSIONS } from './config.js';
+import { DISTRICTS, WEAPONS, RANKS, MISSIONS, PROPERTIES } from './config.js';
 
 export function createInitialState() {
   const standing = {};
@@ -11,13 +11,15 @@ export function createInitialState() {
     weaponAmmo[w.id] = { clip: w.clip, reserve: w.reserve };
   }
 
+  const defaultOwned = PROPERTIES.filter((p) => p.ownedByDefault).map((p) => p.id);
+
   return {
     mode: 'title', // 'title' | 'playing' | 'paused' | 'shop'
     activeSlot: 1,
     timeOfDay: 18.7, // 0..24 (18.7 = golden hour sunset, 21.8 = neon night)
     clockPaused: false,
 
-    cash: 24500,
+    cash: 28500,
     rp: 1450,
     health: 100,
     maxHealth: 100,
@@ -42,6 +44,10 @@ export function createInitialState() {
     missionTimer: 180,
     missionEnemiesRemaining: 0,
     completedMissions: {}, // { m1: 'GOLD', ... }
+
+    ownedProperties: new Set(defaultOwned),
+    vaultBalance: 2600,
+    vehicleUpgrades: { nitroLevel: 1, armorLevel: 1 },
 
     completedRaces: new Set(),
     completedStunts: new Set(),
@@ -97,18 +103,28 @@ export function getRankInfo(rp) {
   };
 }
 
+export function getEmpireIncomePerHour(state) {
+  let total = 0;
+  for (const p of PROPERTIES) {
+    if (state.ownedProperties?.has(p.id)) total += p.incomePerHr;
+  }
+  return total;
+}
+
 export function computeCompletionPercent(state) {
   const mDone = Object.keys(state.completedMissions).length;
+  const pDone = state.ownedProperties ? state.ownedProperties.size : 0;
   const rDone = state.completedRaces.size;
   const sDone = state.completedStunts.size;
   const gDone = state.collectedShells.size;
   const dTrusted = Object.values(state.districtStanding).filter((v) => v >= 70).length;
 
   const pct =
-    (mDone / MISSIONS.length) * 52 +
-    (rDone / 4) * 14 +
-    (sDone / 8) * 14 +
-    (gDone / 20) * 12 +
+    (mDone / MISSIONS.length) * 44 +
+    (pDone / PROPERTIES.length) * 14 +
+    (rDone / 4) * 12 +
+    (sDone / 8) * 12 +
+    (gDone / 20) * 10 +
     (dTrusted / DISTRICTS.length) * 8;
   return Math.min(100, Math.round(pct * 10) / 10);
 }
@@ -147,6 +163,9 @@ export function serializeStateForSave(state) {
     activeMissionId: state.activeMissionId,
     missionStageIdx: state.missionStageIdx,
     completedMissions: { ...state.completedMissions },
+    ownedProperties: [...(state.ownedProperties ?? [])],
+    vaultBalance: Math.round(state.vaultBalance ?? 0),
+    vehicleUpgrades: { ...(state.vehicleUpgrades ?? { nitroLevel: 1, armorLevel: 1 }) },
     completedRaces: [...state.completedRaces],
     completedStunts: [...state.completedStunts],
     collectedShells: [...state.collectedShells],
@@ -163,6 +182,11 @@ export function applySavedData(state, data) {
   state.activeMissionId = data.activeMissionId ?? state.activeMissionId;
   state.missionStageIdx = data.missionStageIdx ?? 0;
   state.completedMissions = { ...(data.completedMissions ?? {}) };
+  if (Array.isArray(data.ownedProperties)) {
+    state.ownedProperties = new Set(data.ownedProperties);
+  }
+  state.vaultBalance = data.vaultBalance ?? state.vaultBalance ?? 0;
+  if (data.vehicleUpgrades) Object.assign(state.vehicleUpgrades, data.vehicleUpgrades);
   state.completedRaces = new Set(data.completedRaces ?? []);
   state.completedStunts = new Set(data.completedStunts ?? []);
   state.collectedShells = new Set(data.collectedShells ?? []);

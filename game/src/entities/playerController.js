@@ -124,21 +124,21 @@ export function buildCharacterMesh({ jacket, accent, pants, skin, hair, isFemale
   const optic = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.1, 0.06), new THREE.MeshBasicMaterial({ color: 0x34e0c8 }));
   optic.position.set(0, -0.12, 0.11);
 
-  // Blazing Additive Starburst Muzzle Flash + Dynamic Orange Light!
+  // Focused Additive Starburst Muzzle Flash + Tight Dynamic Orange Light
   const muzzleFlash = new THREE.Group();
   muzzleFlash.position.set(0, -0.78, 0.04);
   const flashSprite = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: getRadialGlowTexture('#ffffff', 'rgba(255,186,62,0.92)', 'rgba(255,92,24,0)'),
+    map: getRadialGlowTexture('#ffffff', 'rgba(255,186,62,0.88)', 'rgba(255,92,24,0)'),
     transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
   }));
-  flashSprite.scale.set(1.65, 1.65, 1);
+  flashSprite.scale.set(1.12, 1.12, 1);
   const flashCone = new THREE.Mesh(
-    new THREE.ConeGeometry(0.22, 0.85, 6),
-    new THREE.MeshBasicMaterial({ color: 0xffc857, transparent: true, opacity: 0.92, blending: THREE.AdditiveBlending, depthWrite: false })
+    new THREE.ConeGeometry(0.18, 0.68, 6),
+    new THREE.MeshBasicMaterial({ color: 0xffc857, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false })
   );
   flashCone.rotation.x = Math.PI;
-  flashCone.position.y = -0.35;
-  const flashLight = new THREE.PointLight(0xffa43b, 22, 14, 1.8);
+  flashCone.position.y = -0.32;
+  const flashLight = new THREE.PointLight(0xffa43b, 11, 7.5, 2.2);
   muzzleFlash.add(flashSprite, flashCone, flashLight);
   muzzleFlash.visible = false;
 

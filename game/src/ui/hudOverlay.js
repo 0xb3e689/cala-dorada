@@ -1,13 +1,17 @@
 // Razor-sharp dark-glass HUD overlay: mission card, CDPD dispatch board, wanted stars, weapons, crew, minimap, dialogue, radio & speedometer.
 
+import * as THREE from '../../vendor/three.module.min.js';
 import { DISTRICTS, WEAPONS, CREW, RADIO_STATIONS } from '../core/config.js';
 import { getRankInfo, getStandingTier, formatTimeClock } from '../core/gameState.js';
 import { renderPortraitSvg } from './portraitArt.js';
 import { MinimapRenderer } from './minimapRenderer.js';
 
+const _projVec = new THREE.Vector3();
+
 export class HudOverlay {
   constructor() {
     this.root = document.getElementById('hud-root');
+    this.combatLayer = document.getElementById('combat-world-layer');
     this.reticle = document.getElementById('reticle');
     this.missionEl = document.getElementById('mission-card');
     this.dispatchEl = document.getElementById('dispatch-board');
@@ -31,7 +35,67 @@ export class HudOverlay {
 
   setVisible(vis) {
     this.root.classList.toggle('hidden', !vis);
+    if (this.combatLayer) this.combatLayer.classList.toggle('hidden', !vis);
     if (!vis) this.reticle.classList.add('hidden');
+  }
+
+  // Project 3D enemy threat markers, enemy HP bars, hit-confirm crosshair & floating weapon damage numbers every frame
+  updateCombatOverlay({ state, camera, enemies, damagePopups, hitConfirmTimer, hitConfirmCrit }) {
+    if (!this.combatLayer) return;
+    if (state.mode !== 'playing') {
+      this.combatLayer.classList.add('hidden');
+      this.combatLayer.innerHTML = '';
+      this.reticle.classList.remove('hit-confirm', 'hit-crit');
+      return;
+    }
+
+    const showHit = !state.inVehicle && hitConfirmTimer > 0;
+    this.reticle.classList.toggle('hit-confirm', showHit);
+    this.reticle.classList.toggle('hit-crit', showHit && Boolean(hitConfirmCrit));
+
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    let html = '';
+
+    // 1. Overhead Threat Markers & HP Bars for attacking enemies
+    for (const e of enemies ?? []) {
+      if (e.downed || !e.attacking) continue;
+      _projVec.set(e.pos.x, e.pos.y + 2.34, e.pos.z);
+      _projVec.project(camera);
+      if (_projVec.z >= 1 || _projVec.z < -1) continue;
+      const sx = (_projVec.x * 0.5 + 0.5) * W;
+      const sy = (-_projVec.y * 0.5 + 0.5) * H;
+      if (sx < 40 || sx > W - 40 || sy < 40 || sy > H - 40) continue;
+
+      const curHp = Math.max(0, Math.round(e.hp));
+      const maxHp = Math.max(1, Math.round(e.maxHp));
+      const pct = Math.round((curHp / maxHp) * 100);
+      html += `<div class="enemy-tag" style="left:${sx.toFixed(1)}px;top:${sy.toFixed(1)}px">
+        <div class="enemy-threat-badge"><span>!</span><span>HOSTILE</span></div>
+        <div class="enemy-hp-card">
+          <div class="enemy-hp-track"><div class="enemy-hp-fill" style="width:${pct}%"></div></div>
+          <span class="enemy-hp-num">${curHp}/${maxHp}</span>
+        </div>
+        <div class="enemy-chevron"></div>
+      </div>`;
+    }
+
+    // 2. Floating Weapon & Melee Damage Numbers (NEVER for vehicle ramming!)
+    for (const p of damagePopups ?? []) {
+      if (p.source === 'vehicle') continue;
+      _projVec.copy(p.pos);
+      _projVec.project(camera);
+      if (_projVec.z >= 1 || _projVec.z < -1) continue;
+      const sx = (_projVec.x * 0.5 + 0.5) * W;
+      const sy = (-_projVec.y * 0.5 + 0.5) * H;
+      if (sx < 20 || sx > W - 20 || sy < 20 || sy > H - 20) continue;
+
+      const op = Math.min(1, (p.life / p.maxLife) * 1.45);
+      html += `<div class="dmg-popup ${p.crit ? 'crit' : ''}" style="left:${sx.toFixed(1)}px;top:${sy.toFixed(1)}px;opacity:${op.toFixed(2)}">-${p.amount}${p.crit ? '<span class="dmg-crit-tag">CRIT!</span>' : ''}</div>`;
+    }
+
+    this.combatLayer.classList.toggle('hidden', html.length === 0);
+    this.combatLayer.innerHTML = html;
   }
 
   update(ctx) {

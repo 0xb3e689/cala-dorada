@@ -205,28 +205,77 @@ export class CalaDoradaEngine {
     }
   }
 
-  openShop(shop) {
+  openShop(prop) {
     this.setMode('shop');
     this.shopEl.classList.remove('hidden');
-    const isGarage = shop.kind === 'garage';
+    const owned = this.state.ownedProperties?.has(prop.id);
+    const vaultAmt = Math.round(this.state.vaultBalance ?? 0);
+
+    let buttonsHtml = '';
+    if (!owned && prop.price > 0) {
+      buttonsHtml = `
+        <div class="info-card" style="margin-bottom:6px">
+          <h3 style="color:${prop.color}">${prop.districtLabel.toUpperCase()} · ${prop.badge}</h3>
+          <p>${prop.perks}</p>
+        </div>
+        <button class="menu-btn primary" data-act="buy-property"><span>BUY ${prop.shortName}</span><span>$${prop.price.toLocaleString()}</span></button>`;
+    } else if (prop.kind === 'garage') {
+      buttonsHtml = `
+        <button class="menu-btn primary" data-act="repair"><span>FULL REPAIR & NITRO</span><span>$600</span></button>
+        <button class="menu-btn" data-act="clear-wanted"><span>SCRUB PLATES (CLEAR WANTED)</span><span>$2,500</span></button>
+        <button class="menu-btn" data-act="upgrade-nitro"><span>NITRO TANK LV.${(this.state.vehicleUpgrades?.nitroLevel ?? 1) + 1}</span><span>$4,500</span></button>
+        <button class="menu-btn" data-act="upgrade-armor"><span>ARMOR CHASSIS LV.${(this.state.vehicleUpgrades?.armorLevel ?? 1) + 1}</span><span>$6,000</span></button>
+        <button class="menu-btn" data-act="paint:#ff6138"><span>SOLSTICIO CORAL PAINT</span><span>$1,200</span></button>
+        <button class="menu-btn" data-act="paint:#34e0c8"><span>ESMERALDA TEAL PAINT</span><span>$1,200</span></button>
+        <button class="menu-btn" data-act="paint:#ffbe55"><span>GOLD COAST METALLIC</span><span>$1,200</span></button>`;
+    } else if (prop.kind === 'gunsmith') {
+      buttonsHtml = `
+        <button class="menu-btn primary" data-act="ammo"><span>RESTOCK ALL WEAPON AMMO</span><span>$900</span></button>
+        <button class="menu-btn" data-act="armor"><span>KEVLAR ARMOR VEST (100%)</span><span>$1,500</span></button>
+        <button class="menu-btn" data-act="tactical-pack"><span>FULL TACTICAL LOADOUT PACK</span><span>$2,200</span></button>`;
+    } else if (prop.kind === 'safehouse') {
+      buttonsHtml = `
+        <button class="menu-btn primary" data-act="safehouse-rest"><span>REST, FULL HEAL & SAVE GAME</span><span>FREE</span></button>
+        <button class="menu-btn" data-act="advance-time"><span>ADVANCE TIME OF DAY (+5.5H)</span><span>FREE</span></button>`;
+    } else if (prop.kind === 'vault') {
+      buttonsHtml = `
+        <button class="menu-btn primary" data-act="collect-vault"><span>COLLECT EMPIRE VAULT INCOME</span><span>+$${vaultAmt.toLocaleString()}</span></button>
+        <button class="menu-btn" data-act="safehouse-rest"><span>SECURE SAVE TO SLOT ${this.state.activeSlot}</span><span>FREE</span></button>`;
+    } else if (prop.kind === 'marina') {
+      buttonsHtml = `
+        <button class="menu-btn primary" data-act="marina-cooldown"><span>QUICK REPAIR & CLEAR HEAT</span><span>FREE</span></button>
+        <button class="menu-btn" data-act="collect-vault"><span>COLLECT EMPIRE INCOME</span><span>+$${vaultAmt.toLocaleString()}</span></button>`;
+    } else if (prop.kind === 'penthouse') {
+      buttonsHtml = `
+        <button class="menu-btn primary" data-act="penthouse-stash"><span>FULL HEALTH, ARMOR & AMMO STASH</span><span>FREE</span></button>
+        <button class="menu-btn" data-act="advance-time"><span>ADVANCE TIME OF DAY (+5.5H)</span><span>FREE</span></button>
+        <button class="menu-btn" data-act="collect-vault"><span>COLLECT EMPIRE INCOME</span><span>+$${vaultAmt.toLocaleString()}</span></button>`;
+    } else {
+      buttonsHtml = `
+        <button class="menu-btn primary" data-act="spawn-perk-vehicle"><span>DELIVER ${prop.spawnVehicle === 'apex_gt' ? 'DORADO APEX GT' : 'ARMORED BAJA SUV'}</span><span>FREE</span></button>
+        <button class="menu-btn" data-act="collect-vault"><span>COLLECT EMPIRE INCOME</span><span>+$${vaultAmt.toLocaleString()}</span></button>`;
+    }
+
     this.shopEl.innerHTML = `
-      <div class="glass-card panel-box" style="max-width:480px;margin:auto">
-        <div class="panel-hdr"><span>${shop.name.toUpperCase()}</span><span>$${Math.round(this.state.cash).toLocaleString()}</span></div>
-        ${isGarage ? `
-          <button class="menu-btn primary" data-buy="repair"><span>FULL REPAIR & NITRO</span><span>$600</span></button>
-          <button class="menu-btn" data-buy="paint:#ff6138"><span>SOLSTICIO CORAL PAINT</span><span>$1,200</span></button>
-          <button class="menu-btn" data-buy="paint:#34e0c8"><span>ESMERALDA TEAL PAINT</span><span>$1,200</span></button>
-          <button class="menu-btn" data-buy="paint:#ffbe55"><span>GOLD COAST METALLIC</span><span>$1,200</span></button>
-        ` : `
-          <button class="menu-btn primary" data-buy="ammo"><span>RESTOCK ALL AMMO</span><span>$900</span></button>
-          <button class="menu-btn" data-buy="armor"><span>KEVLAR ARMOR VEST (100%)</span><span>$1,500</span></button>
-        `}
-        <button class="resume-btn" id="shop-close">LEAVE SHOP [ESC]</button>
+      <div class="glass-card panel-box" style="max-width:500px;margin:auto">
+        <div class="panel-hdr"><span>${prop.name.toUpperCase()}</span><span style="color:#42e38c">$${Math.round(this.state.cash).toLocaleString()}</span></div>
+        ${buttonsHtml}
+        <button class="resume-btn" id="shop-close">LEAVE PROPERTY [ESC]</button>
       </div>`;
-    this.shopEl.querySelectorAll('[data-buy]').forEach((b) => {
+
+    this.shopEl.querySelectorAll('[data-act]').forEach((b) => {
       b.addEventListener('click', () => {
-        this.activities.applyShopPurchase(shop.kind, b.dataset.buy, this.state, this.playerVehicle, this.audio);
-        this.openShop(shop);
+        this.activities.applyPropertyAction(
+          prop,
+          b.dataset.act,
+          this.state,
+          this.playerVehicle,
+          this.police,
+          this.saveManager,
+          this.audio,
+          () => this.sky.applyTimeOfDay(this.state.timeOfDay, this.getFocusPos())
+        );
+        this.openShop(prop);
       });
     });
     this.shopEl.querySelector('#shop-close').addEventListener('click', () => {
@@ -293,6 +342,16 @@ export class CalaDoradaEngine {
           },
           onStuntLand: (rampId, dist) => this.activities.onStuntLand(rampId, dist, this.state, this.audio),
         });
+        // Car-vs-enemy ramming: deals impact damage cleanly with source: 'vehicle' (NEVER spawns floating damage numbers!)
+        if (this.playerVehicle.speed > 7.5) {
+          for (const e of this.combat.enemies) {
+            if (e.downed) continue;
+            if (Math.hypot(this.playerVehicle.pos.x - e.pos.x, this.playerVehicle.pos.z - e.pos.z) < 2.6) {
+              this.combat.applyEnemyDamage(e, Math.round(this.playerVehicle.speed * 2.2), e.pos, this.state, { source: 'vehicle' });
+              this.police.addHeat(this.state, 32);
+            }
+          }
+        }
         const mph = Math.round(this.playerVehicle.speed * 2.32);
         if (mph > this.state.careerStats.topSpeedMph) this.state.careerStats.topSpeedMph = mph;
         this.state.careerStats.distanceKm += (this.playerVehicle.speed * dt) / 1000;
@@ -339,6 +398,15 @@ export class CalaDoradaEngine {
     this.sky.applyTimeOfDay(this.state.timeOfDay, pos, this.shotSunDir ?? null);
     this.sky.updateAmbient(dt, this.elapsed, this.worldAnim);
     this._updateCamera(dt);
+    this.camera.updateMatrixWorld(true);
+    this.hud.updateCombatOverlay({
+      state: this.state,
+      camera: this.camera,
+      enemies: this.combat.enemies,
+      damagePopups: this.combat.damagePopups,
+      hitConfirmTimer: this.combat.hitConfirmTimer,
+      hitConfirmCrit: this.combat.hitConfirmCrit,
+    });
     this.renderer.render(this.scene, this.camera);
     this.input.endFrame();
   }
@@ -356,7 +424,7 @@ export class CalaDoradaEngine {
       policeUnits: this.police.units,
       heliPos: this.heli.mesh.position,
       enemies: this.combat.enemies,
-      promptText: this.activities.getPromptText(),
+      promptText: this.activities.getPromptText(this.state),
       elapsed: this.elapsed,
       forceDom,
     });
