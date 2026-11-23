@@ -1,19 +1,75 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Block Dodger</title>
-<style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #11141b; }
-  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-  /* Read aloud, never shown: the status line screen readers announce. */
-  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CALA DORADA — Gold Coast Syndicate</title>
+  <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-<canvas id="game" aria-label="Block Dodger: move the paddle left and right to dodge falling blocks and catch coins"></canvas>
-<p id="status" role="status" aria-live="polite"></p>
-<script type="module" src="./src/main.js"></script>
+  <canvas id="game-canvas" aria-label="Cala Dorada open-world 3D action game"></canvas>
+
+  <!-- Aiming Reticle (On-Foot Combat) -->
+  <div id="reticle" class="reticle hidden" aria-hidden="true">
+    <div class="reticle-ring"></div>
+    <div class="reticle-dot"></div>
+    <div class="reticle-tick t-top"></div>
+    <div class="reticle-tick t-bottom"></div>
+    <div class="reticle-tick t-left"></div>
+    <div class="reticle-tick t-right"></div>
+  </div>
+
+  <!-- Live Gameplay HUD -->
+  <div id="hud-root" class="hud-root hidden">
+    <!-- TOP LEFT: Mission Card + CDPD Tactical Dispatch Board -->
+    <div class="hud-tl">
+      <section id="mission-card" class="glass-card mission-card"></section>
+      <section id="dispatch-board" class="glass-card dispatch-board hidden"></section>
+    </div>
+
+    <!-- TOP RIGHT: Clock/Cash, Wanted Stars, Air Unit Alert, Rank/RP, Weapons, Crew -->
+    <div class="hud-tr">
+      <section id="status-strip" class="glass-card status-strip"></section>
+      <section id="wanted-panel" class="glass-card wanted-panel"></section>
+      <section id="rank-card" class="glass-card rank-card"></section>
+      <section id="weapon-bar" class="glass-card weapon-bar"></section>
+      <section id="crew-bar" class="crew-bar"></section>
+    </div>
+
+    <!-- CENTER TOAST / ACTION PROMPT -->
+    <div id="banner-toast" class="banner-toast hidden"></div>
+    <div id="interact-prompt" class="interact-prompt hidden"></div>
+
+    <!-- BOTTOM LEFT: District + Standing + Minimap + Vitals -->
+    <div class="hud-bl">
+      <div id="district-card" class="glass-card district-card"></div>
+      <div class="radar-wrap glass-card">
+        <canvas id="minimap-canvas" width="212" height="168"></canvas>
+        <div id="minimap-gps-pill" class="minimap-gps-pill"></div>
+      </div>
+      <div id="vitals-bar" class="glass-card vitals-bar"></div>
+    </div>
+
+    <!-- BOTTOM CENTER: Character Portrait Dialogue -->
+    <div id="dialogue-box" class="glass-card dialogue-box hidden"></div>
+
+    <!-- BOTTOM RIGHT: Radio + Vehicle Condition + Speedometer -->
+    <div class="hud-br">
+      <div id="radio-ticker" class="glass-card radio-ticker"></div>
+      <div id="vehicle-hud" class="glass-card vehicle-hud"></div>
+    </div>
+  </div>
+
+  <!-- Pause / Career / Map / Save Menu -->
+  <div id="career-overlay" class="overlay-backdrop hidden"></div>
+
+  <!-- Title / Start Screen -->
+  <div id="title-overlay" class="title-overlay hidden"></div>
+
+  <!-- Shop Modal (Garage / Gunsmith) -->
+  <div id="shop-overlay" class="overlay-backdrop hidden"></div>
+
+  <p id="sr-status" class="sr-only" role="status" aria-live="polite"></p>
+  <script type="module" src="./src/main.js"></script>
 </body>
 </html>
