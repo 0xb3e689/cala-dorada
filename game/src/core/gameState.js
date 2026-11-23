@@ -34,6 +34,8 @@ export function createInitialState() {
 
     activeWeaponIdx: 2, // 0..5
     weaponAmmo,
+    weaponWheelOpen: false,
+    weaponWheelHoverIdx: 2,
 
     inVehicle: true,
     currentDistrictId: 'paseo-dorado',
@@ -48,6 +50,39 @@ export function createInitialState() {
     ownedProperties: new Set(defaultOwned),
     vaultBalance: 2600,
     vehicleUpgrades: { nitroLevel: 1, armorLevel: 1 },
+    carMods: {
+      paint: '#ff6138',
+      finish: 'metallic',
+      spoiler: 'gt',
+      underglow: 'off',
+      rims: '#e6edf7',
+      turboLevel: 1,
+      armorLevel: 1,
+    },
+    playerAppearance: {
+      outfitStyle: 'bomber',
+      jacketColor: '#e65f3c',
+      pantsColor: '#1b2230',
+      hairStyle: 'swept',
+      hairColor: '#1b1514',
+      skinTone: '#d9a17a',
+      accessory: 'aviators',
+    },
+    gardenPlots: [
+      { id: 'v1', siteId: 'garden-villas', cropId: 'orchids', stage: 3, progress: 1 },
+      { id: 'v2', siteId: 'garden-villas', cropId: 'hibiscus', stage: 2, progress: 0.65 },
+      { id: 'v3', siteId: 'garden-villas', cropId: 'peppers', stage: 1, progress: 0.35 },
+      { id: 'v4', siteId: 'garden-villas', cropId: null, stage: 0, progress: 0 },
+      { id: 'l1', siteId: 'garden-loft', cropId: 'palms', stage: 3, progress: 1 },
+      { id: 'l2', siteId: 'garden-loft', cropId: 'peppers', stage: 2, progress: 0.7 },
+      { id: 'l3', siteId: 'garden-loft', cropId: null, stage: 0, progress: 0 },
+      { id: 'l4', siteId: 'garden-loft', cropId: null, stage: 0, progress: 0 },
+    ],
+    roofProgress: {
+      'roof-viejo-1': 0,
+      'roof-viejo-2': 0,
+    },
+    fishLog: [],
 
     completedRaces: new Set(),
     completedStunts: new Set(),
@@ -59,6 +94,7 @@ export function createInitialState() {
     radioMuted: false,
 
     crewCooldowns: { nadia: 0, toma: 0, sora: 0 },
+    crewHealth: { nadia: 100, toma: 100, sora: 100 },
 
     customWaypoint: null, // { x, z, label }
     dialogue: null, // { speaker, portrait, text, timer }
@@ -72,6 +108,10 @@ export function createInitialState() {
       takedowns: 19,
       playtimeSec: 1840,
       distanceKm: 14.6,
+      carModsInstalled: 0,
+      fishCaught: 0,
+      cropsHarvested: 0,
+      roofsRepaired: 0,
     },
 
     settings: {
@@ -166,6 +206,11 @@ export function serializeStateForSave(state) {
     ownedProperties: [...(state.ownedProperties ?? [])],
     vaultBalance: Math.round(state.vaultBalance ?? 0),
     vehicleUpgrades: { ...(state.vehicleUpgrades ?? { nitroLevel: 1, armorLevel: 1 }) },
+    carMods: { ...(state.carMods ?? {}) },
+    playerAppearance: { ...(state.playerAppearance ?? {}) },
+    gardenPlots: (state.gardenPlots ?? []).map((p) => ({ ...p })),
+    roofProgress: { ...(state.roofProgress ?? {}) },
+    fishLog: [...(state.fishLog ?? [])].slice(-20),
     completedRaces: [...state.completedRaces],
     completedStunts: [...state.completedStunts],
     collectedShells: [...state.collectedShells],
@@ -187,6 +232,13 @@ export function applySavedData(state, data) {
   }
   state.vaultBalance = data.vaultBalance ?? state.vaultBalance ?? 0;
   if (data.vehicleUpgrades) Object.assign(state.vehicleUpgrades, data.vehicleUpgrades);
+  if (data.carMods) Object.assign(state.carMods, data.carMods);
+  if (data.playerAppearance) Object.assign(state.playerAppearance, data.playerAppearance);
+  if (Array.isArray(data.gardenPlots)) {
+    state.gardenPlots = data.gardenPlots.map((p) => ({ ...p }));
+  }
+  if (data.roofProgress) Object.assign(state.roofProgress, data.roofProgress);
+  if (Array.isArray(data.fishLog)) state.fishLog = [...data.fishLog];
   state.completedRaces = new Set(data.completedRaces ?? []);
   state.completedStunts = new Set(data.completedStunts ?? []);
   state.collectedShells = new Set(data.collectedShells ?? []);

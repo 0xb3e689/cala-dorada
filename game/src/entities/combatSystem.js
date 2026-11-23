@@ -2,7 +2,7 @@
 
 import * as THREE from '../../vendor/three.module.min.js';
 import { WEAPONS } from '../core/config.js';
-import { buildCharacterMesh } from './playerController.js';
+import { buildCharacterMesh, poseHumanCombat } from './playerController.js';
 import { getRadialGlowTexture } from './vehicleFactory.js';
 
 export class CombatSystem {
@@ -32,14 +32,14 @@ export class CombatSystem {
   spawnEnemy(x, z, yaw = 0, downed = false, maxHp = 100) {
     const mesh = buildCharacterMesh({
       jacket: 0x1a3f4d, accent: 0xff4b5c, pants: 0x141822, skin: 0xcf9670, hair: 0x171414,
+      outfitStyle: 'tactical', hairStyle: 'fade', accessory: 'aviators',
     });
     mesh.position.set(x, downed ? 0.22 : 0, z);
     mesh.rotation.y = yaw;
     if (downed) {
       mesh.rotation.x = -Math.PI / 2;
     } else {
-      mesh.userData.limbs.armR.rotation.x = -1.45;
-      mesh.userData.limbs.armL.rotation.x = -1.15;
+      poseHumanCombat(mesh, true);
     }
     this.group.add(mesh);
     const enemy = {
@@ -199,7 +199,7 @@ export class CombatSystem {
     if (audio) audio.playGunshot(weapon.id);
     if (onCrime) onCrime();
 
-    const origin = player.pos.clone().add(new THREE.Vector3(0, 1.42, 0));
+    const origin = player.getMuzzleWorldPos ? player.getMuzzleWorldPos() : player.pos.clone().add(new THREE.Vector3(0, 1.42, 0));
     const pellets = weapon.pellets ?? 1;
     const hitTotals = new Map(); // Aggregate shotgun pellets per enemy into one crisp damage popup
 
@@ -215,11 +215,11 @@ export class CombatSystem {
       let bestPerp = 99;
       for (const e of this.enemies) {
         if (e.downed) continue;
-        const toE = e.pos.clone().add(new THREE.Vector3(0, 1.25, 0)).sub(origin);
+        const toE = e.pos.clone().add(new THREE.Vector3(0, 1.32, 0)).sub(origin);
         const proj = toE.dot(dir);
         if (proj > 0 && proj < bestDist) {
           const perp = toE.clone().addScaledVector(dir, -proj).length();
-          if (perp < 1.15) {
+          if (perp < 0.85) {
             bestDist = proj;
             bestPerp = perp;
             hitEnemy = e;

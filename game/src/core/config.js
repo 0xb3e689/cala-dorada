@@ -115,12 +115,107 @@ export const VEHICLES = {
 };
 
 export const WEAPONS = [
-  { id: 'fists', slot: 1, name: 'Fists', icon: '✊', damage: 18, fireRate: 0.42, range: 3.2, spread: 0, clip: 0, reserve: 0, melee: true },
-  { id: 'bat', slot: 2, name: 'Alloy Bat', icon: '🏏', damage: 34, fireRate: 0.55, range: 3.8, spread: 0, clip: 0, reserve: 0, melee: true },
-  { id: 'pistol', slot: 3, name: 'Sol 9mm', icon: '🔫', damage: 24, fireRate: 0.25, range: 58, spread: 0.02, clip: 15, reserve: 120 },
-  { id: 'smg', slot: 4, name: 'Vector SMG', icon: '⚡', damage: 18, fireRate: 0.095, range: 52, spread: 0.045, clip: 32, reserve: 192, auto: true },
-  { id: 'shotgun', slot: 5, name: 'Breacher 12G', icon: '💥', damage: 16, pellets: 6, fireRate: 0.72, range: 28, spread: 0.11, clip: 8, reserve: 48 },
-  { id: 'carbine', slot: 6, name: 'Carbine AR', icon: '🎯', damage: 29, fireRate: 0.13, range: 76, spread: 0.025, clip: 30, reserve: 180, auto: true },
+  { id: 'fists', slot: 1, name: 'Fists', shortName: 'Fists', damage: 18, fireRate: 0.42, range: 3.2, spread: 0, clip: 0, reserve: 0, melee: true },
+  { id: 'bat', slot: 2, name: 'Alloy Bat', shortName: 'Bat', damage: 34, fireRate: 0.55, range: 3.8, spread: 0, clip: 0, reserve: 0, melee: true },
+  { id: 'pistol', slot: 3, name: 'Sol 9mm', shortName: '9mm', damage: 24, fireRate: 0.25, range: 58, spread: 0.02, clip: 15, reserve: 120 },
+  { id: 'smg', slot: 4, name: 'Vector SMG', shortName: 'Vector', damage: 18, fireRate: 0.095, range: 52, spread: 0.045, clip: 32, reserve: 192, auto: true },
+  { id: 'shotgun', slot: 5, name: 'Breacher 12G', shortName: '12G', damage: 16, pellets: 6, fireRate: 0.72, range: 28, spread: 0.11, clip: 8, reserve: 48 },
+  { id: 'carbine', slot: 6, name: 'Carbine AR', shortName: 'Carbine', damage: 29, fireRate: 0.13, range: 76, spread: 0.025, clip: 30, reserve: 180, auto: true },
+];
+
+export const CAR_PAINTS = [
+  { id: 'coral', name: 'Solsticio Coral', hex: '#ff6138', price: 800 },
+  { id: 'teal', name: 'Esmeralda Teal', hex: '#2ec4b6', price: 800 },
+  { id: 'gold', name: 'Cala Gold', hex: '#ffbe55', price: 1000 },
+  { id: 'crimson', name: 'Crimson Drift', hex: '#e63946', price: 900 },
+  { id: 'cobalt', name: 'Pacific Cobalt', hex: '#3b82f6', price: 900 },
+  { id: 'violet', name: 'Neon Violet', hex: '#9b5de5', price: 1100 },
+  { id: 'pearl', name: 'Alabaster Pearl', hex: '#edf2f7', price: 900 },
+  { id: 'obsidian', name: 'Obsidian Matte', hex: '#1c222d', price: 1200 },
+];
+
+export const CAR_SPOILERS = [
+  { id: 'stock', name: 'Stock Clean', price: 0 },
+  { id: 'ducktail', name: 'Ducktail Lip', price: 1400 },
+  { id: 'gt', name: 'Carbon GT Wing', price: 2400 },
+];
+
+export const CAR_UNDERGLOWS = [
+  { id: 'off', name: 'Off', hex: null, price: 0 },
+  { id: 'cyan', name: 'Cyan', hex: '#34e0c8', price: 1200 },
+  { id: 'gold', name: 'Gold', hex: '#ffbe55', price: 1200 },
+  { id: 'coral', name: 'Coral', hex: '#ff6b4a', price: 1200 },
+  { id: 'violet', name: 'Violet', hex: '#a876ff', price: 1200 },
+];
+
+export const CAR_RIMS = [
+  { id: 'silver', name: 'Alloy Silver', hex: '#e6edf7', price: 0 },
+  { id: 'gold', name: 'Forged Gold', hex: '#eab308', price: 900 },
+  { id: 'stealth', name: 'Stealth Black', hex: '#232833', price: 900 },
+  { id: 'bronze', name: 'Copper Bronze', hex: '#c87d55', price: 950 },
+];
+
+export const WARDROBE_OPTIONS = {
+  outfits: [
+    { id: 'bomber', name: 'Coastal Bomber' },
+    { id: 'blazer', name: 'Syndicate Blazer' },
+    { id: 'tactical', name: 'Tactical Vest' },
+    { id: 'coastal', name: 'Resort Linen' },
+  ],
+  jacketColors: [
+    { name: 'Coral', hex: '#e65f3c' },
+    { name: 'Teal', hex: '#22b8a8' },
+    { name: 'Obsidian', hex: '#1e2430' },
+    { name: 'Cream', hex: '#e8dcc8' },
+    { name: 'Crimson', hex: '#c9344c' },
+    { name: 'Cobalt', hex: '#2d6cdf' },
+  ],
+  pantsColors: [
+    { name: 'Slate', hex: '#1b2230' },
+    { name: 'Charcoal', hex: '#24272e' },
+    { name: 'Sand', hex: '#b69f80' },
+    { name: 'Indigo', hex: '#25395c' },
+    { name: 'Olive', hex: '#384737' },
+  ],
+  hairStyles: [
+    { id: 'swept', name: 'Swept Back' },
+    { id: 'fade', name: 'Short Fade' },
+    { id: 'ponytail', name: 'Tied Back' },
+    { id: 'slick', name: 'Classic Slick' },
+  ],
+  hairColors: [
+    { name: 'Espresso', hex: '#1b1514' },
+    { name: 'Chestnut', hex: '#4a2e1f' },
+    { name: 'Blonde', hex: '#c7a265' },
+    { name: 'Silver', hex: '#a6b0bf' },
+    { name: 'Auburn', hex: '#7a2f24' },
+  ],
+  skinTones: [
+    { name: 'Fair', hex: '#ecc0a2' },
+    { name: 'Warm Tan', hex: '#d9a17a' },
+    { name: 'Olive', hex: '#c48c64' },
+    { name: 'Bronze', hex: '#9e6844' },
+    { name: 'Deep', hex: '#69422b' },
+  ],
+  accessories: [
+    { id: 'aviators', name: 'Aviators' },
+    { id: 'cap', name: 'Baseball Cap' },
+    { id: 'none', name: 'None' },
+  ],
+};
+
+export const FISH_SPECIES = [
+  { id: 'snapper', name: 'Golden Snapper', minKg: 1.4, maxKg: 4.2, cash: 450, rp: 45, difficulty: 0.72 },
+  { id: 'mahi', name: 'Mahi-Mahi', minKg: 4.5, maxKg: 11.8, cash: 820, rp: 80, difficulty: 0.88 },
+  { id: 'barracuda', name: 'Barracuda', minKg: 3.8, maxKg: 9.6, cash: 1150, rp: 110, difficulty: 1.05 },
+  { id: 'grouper', name: 'Reef Grouper', minKg: 6.2, maxKg: 16.5, cash: 1450, rp: 145, difficulty: 1.18 },
+];
+
+export const GARDEN_CROPS = [
+  { id: 'peppers', name: 'Coastal Peppers', seedCost: 90, sellValue: 420, color: '#ff5247', growSec: 18 },
+  { id: 'orchids', name: 'Orchids', seedCost: 120, sellValue: 540, color: '#e85aff', growSec: 22 },
+  { id: 'hibiscus', name: 'Hibiscus', seedCost: 140, sellValue: 620, color: '#ff6b9d', growSec: 24 },
+  { id: 'palms', name: 'Dwarf Palms', seedCost: 220, sellValue: 900, color: '#34d399', growSec: 28 },
 ];
 
 export const CREW = [

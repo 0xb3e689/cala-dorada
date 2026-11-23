@@ -1,7 +1,7 @@
 // High-contrast tactical radar minimap with streets, coastline, GPS path, police blips, helicopter, and icons.
 
 import { DISTRICTS, PROPERTIES } from '../core/config.js';
-import { ROAD_X, ROAD_Z, computeGpsPath } from '../world/cityPlan.js';
+import { ROAD_X, ROAD_Z, FISHING_SPOTS, GARDEN_SITES, ROOF_REPAIR_SITES, computeGpsPath } from '../world/cityPlan.js';
 
 export class MinimapRenderer {
   constructor(canvas) {
@@ -123,6 +123,26 @@ export class MinimapRenderer {
         ctx.stroke();
       }
       ctx.restore();
+    }
+
+    // Activity blips (Fishing cyan, Garden lime, Roof Repair orange)
+    for (const f of FISHING_SPOTS) {
+      const s = toScreen(f.x, f.z);
+      if (s.x < -6 || s.x > W + 6 || s.y < -6 || s.y > H + 6) continue;
+      ctx.fillStyle = '#38bdf8';
+      ctx.beginPath(); ctx.arc(s.x, s.y, 3.4, 0, Math.PI * 2); ctx.fill();
+    }
+    for (const g of GARDEN_SITES) {
+      const s = toScreen(g.x, g.z);
+      if (s.x < -6 || s.x > W + 6 || s.y < -6 || s.y > H + 6) continue;
+      ctx.fillStyle = '#a3e635';
+      ctx.beginPath(); ctx.arc(s.x, s.y, 3.4, 0, Math.PI * 2); ctx.fill();
+    }
+    for (const r of ROOF_REPAIR_SITES) {
+      const s = toScreen(r.x, r.z);
+      if (s.x < -6 || s.x > W + 6 || s.y < -6 || s.y > H + 6) continue;
+      ctx.fillStyle = '#fb923c';
+      ctx.beginPath(); ctx.arc(s.x, s.y, 3.4, 0, Math.PI * 2); ctx.fill();
     }
 
     // Enemy blips

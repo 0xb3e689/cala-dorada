@@ -176,8 +176,12 @@ export function createVehicleMesh(typeKey, overrideColor = null) {
     }
   }
 
-  // Hero Dorado Apex GT bespoke trim: twin racing stripes, GT carbon rear wing, twin exhaust & nitro flames
+  // Hero Dorado Apex GT bespoke trim: twin racing stripes, switchable spoilers (Stock / Ducktail / GT Wing), neon underglow & nitro flames
   let nitroFlames = null;
+  let spoilerGt = null;
+  let spoilerDucktail = null;
+  let underglowGroup = null;
+  let underglowMat = null;
   if (isSuper) {
     for (const sx of [-0.24, 0.24]) {
       const stripeHood = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.04, L * 0.34), accentMat);
@@ -188,22 +192,52 @@ export function createVehicleMesh(typeKey, overrideColor = null) {
       g.add(stripeHood, stripeRoof);
     }
 
-    // Carbon GT rear wing + endplates
+    // Option A: Carbon GT rear wing + endplates
+    spoilerGt = new THREE.Group();
     const wingY = 0.44 + chassisH + 0.44;
     const wing = new THREE.Mesh(new THREE.BoxGeometry(W * 1.04, 0.09, 0.44), darkMat);
     wing.position.set(0, wingY, -L * 0.46);
     wing.rotation.x = 0.1;
-    g.add(wing);
+    spoilerGt.add(wing);
     for (const sx of [-W * 0.52, W * 0.52]) {
       const endplate = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.26, 0.5), paintMat);
       endplate.position.set(sx, wingY - 0.02, -L * 0.46);
-      g.add(endplate);
+      spoilerGt.add(endplate);
     }
     for (const sx of [-0.66, 0.66]) {
       const strut = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.46, 0.22), darkMat);
       strut.position.set(sx, 0.44 + chassisH + 0.2, -L * 0.44);
-      g.add(strut);
+      spoilerGt.add(strut);
     }
+    g.add(spoilerGt);
+
+    // Option B: Sculpted Ducktail Lip Spoiler
+    spoilerDucktail = new THREE.Group();
+    const duck = new THREE.Mesh(new THREE.BoxGeometry(W * 0.94, 0.16, 0.34), paintMat);
+    duck.position.set(0, 0.44 + chassisH + 0.09, -L * 0.46);
+    duck.rotation.x = 0.36;
+    spoilerDucktail.add(duck);
+    spoilerDucktail.visible = false;
+    g.add(spoilerDucktail);
+
+    // Neon Underglow Kit (chassis light tubes + additive road glow halo)
+    underglowGroup = new THREE.Group();
+    underglowMat = new THREE.MeshBasicMaterial({
+      color: 0x34e0c8, transparent: true, opacity: 0.48, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    });
+    const glowPlane = new THREE.Mesh(new THREE.PlaneGeometry(W * 1.48, L * 1.24), underglowMat);
+    glowPlane.rotation.x = -Math.PI / 2;
+    glowPlane.position.y = 0.13;
+    const stripMat = new THREE.MeshBasicMaterial({ color: 0x34e0c8 });
+    for (const sx of [-W * 0.48, W * 0.48]) {
+      const tube = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.06, L * 0.78), stripMat);
+      tube.position.set(sx, 0.24, 0);
+      underglowGroup.add(tube);
+    }
+    underglowGroup.add(glowPlane);
+    underglowGroup.userData.stripMat = stripMat;
+    underglowGroup.visible = false;
+    g.add(underglowGroup);
 
     // Twin chrome exhaust pipes + glowing nitro flame cones (visible on boost / chase shot)
     nitroFlames = new THREE.Group();
@@ -340,8 +374,47 @@ export function createVehicleMesh(typeKey, overrideColor = null) {
     }
   }
 
-  g.userData = { typeKey, spec, wheels, lightbar, paintMat, nitroFlames };
+  g.userData = {
+    typeKey, spec, wheels, lightbar, paintMat, rimMat, nitroFlames,
+    spoilerGt, spoilerDucktail, underglowGroup, underglowMat,
+  };
   return g;
+}
+
+// Live 3D vehicle customization updater (paint, metallic/matte finish, spoiler, neon underglow, rims, armor)
+export function applyVehicleMods(vehicle, mods) {
+  if (!vehicle?.mesh?.userData || !mods) return;
+  const ud = vehicle.mesh.userData;
+  if (ud.paintMat && mods.paint) {
+    ud.paintMat.color.set(mods.paint);
+    if (mods.finish === 'matte') {
+      ud.paintMat.roughness = 0.72;
+      ud.paintMat.metalness = 0.14;
+    } else {
+      ud.paintMat.roughness = 0.18;
+      ud.paintMat.metalness = 0.72;
+    }
+  }
+  if (ud.rimMat && mods.rims) {
+    ud.rimMat.color.set(mods.rims);
+  }
+  if (ud.spoilerGt) ud.spoilerGt.visible = mods.spoiler === 'gt';
+  if (ud.spoilerDucktail) ud.spoilerDucktail.visible = mods.spoiler === 'ducktail';
+  if (ud.underglowGroup) {
+    const active = Boolean(mods.underglow && mods.underglow !== 'off');
+    ud.underglowGroup.visible = active;
+    if (active) {
+      ud.underglowMat.color.set(mods.underglow);
+      ud.underglowGroup.userData.stripMat.color.set(mods.underglow);
+    }
+  }
+  const armorLvl = mods.armorLevel ?? 1;
+  const newMaxHp = Math.round(vehicle.spec.maxHp * (1 + (armorLvl - 1) * 0.25));
+  if (vehicle.maxHp !== newMaxHp) {
+    vehicle.maxHp = newMaxHp;
+    vehicle.hp = Math.min(vehicle.maxHp, Math.max(vehicle.hp, newMaxHp));
+  }
+  vehicle.turboLevel = mods.turboLevel ?? 1;
 }
 
 function buildScooter(g, bodyColor, accentColor) {

@@ -79,8 +79,9 @@ export class VehiclePhysics {
     const boost = (input.isDown('ShiftLeft') || input.isDown('ShiftRight')) && v.nitro > 4 && forward > 0;
 
     const spec = v.spec;
-    const maxSpd = boost ? spec.maxSpeed * 1.34 : spec.maxSpeed;
-    const accel = boost ? spec.accel * 1.65 : spec.accel;
+    const turboMul = 1 + ((v.turboLevel ?? 1) - 1) * 0.1;
+    const maxSpd = (boost ? spec.maxSpeed * 1.34 : spec.maxSpeed) * turboMul;
+    const accel = (boost ? spec.accel * 1.65 : spec.accel) * turboMul;
 
     if (boost) {
       v.nitro = Math.max(0, v.nitro - dt * 28);

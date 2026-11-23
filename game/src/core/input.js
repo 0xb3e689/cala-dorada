@@ -11,7 +11,10 @@ export class InputController {
     this.lookDeltaY = 0;
     this.wheelDelta = 0;
     this.pointerLocked = false;
+    this.mouseX = window.innerWidth / 2;
+    this.mouseY = window.innerHeight / 2;
     this.onAction = null;
+    this.onKeyUp = null;
 
     this._bind();
   }
@@ -31,6 +34,7 @@ export class InputController {
 
     window.addEventListener('keyup', (e) => {
       this.keys.delete(e.code);
+      if (this.onKeyUp) this.onKeyUp(e.code);
     });
 
     window.addEventListener('blur', () => {
@@ -52,6 +56,8 @@ export class InputController {
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
     window.addEventListener('mousemove', (e) => {
+      this.mouseX = e.clientX;
+      this.mouseY = e.clientY;
       if (document.pointerLockElement === this.canvas || this.rightMouseDown) {
         this.lookDeltaX += e.movementX;
         this.lookDeltaY += e.movementY;

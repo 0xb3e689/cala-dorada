@@ -3,6 +3,7 @@
 import * as THREE from '../../vendor/three.module.min.js';
 import { ROAD_X, ROAD_Z } from './cityPlan.js';
 import { createVehicleMesh } from '../entities/vehicleFactory.js';
+import { buildCharacterMesh, poseHumanStride } from '../entities/playerController.js';
 
 export class TrafficAndPeds {
   constructor(scene) {
@@ -230,109 +231,60 @@ export class TrafficAndPeds {
 }
 
 export function createPedMesh(shirtColor, pantsColor = 0x263145, role = 'commuter') {
-  const g = new THREE.Group();
-
   let topCol = shirtColor;
   let botCol = pantsColor;
   let skinCol = role === 'beachgoer' ? 0xcf8e64 : 0xd9a27c;
+  let accentCol = 0xf4eee4;
+  let outfitStyle = 'coastal';
+  let accessory = 'none';
+  let isFemale = false;
 
   if (role === 'officer') {
     topCol = 0x1b335c;
     botCol = 0x101c34;
+    accentCol = 0xdbe6f6;
+    outfitStyle = 'tactical';
+    accessory = 'aviators';
   } else if (role === 'enforcer') {
     topCol = 0x173c4a;
     botCol = 0x141720;
+    accentCol = 0xff4b5c;
+    outfitStyle = 'bomber';
+    accessory = 'aviators';
   } else if (role === 'beachgoer') {
     botCol = shirtColor;
+    isFemale = (shirtColor % 2 === 0);
   } else if (role === 'jogger') {
     botCol = 0x1a202e;
+    isFemale = (shirtColor % 3 === 0);
   } else if (role === 'vendor') {
     botCol = 0x2a2420;
+    outfitStyle = 'coastal';
+  } else if (role === 'tourist') {
+    isFemale = (shirtColor % 2 === 1);
+    accessory = 'aviators';
+  } else {
+    outfitStyle = 'blazer';
+    isFemale = (shirtColor % 2 === 0);
   }
 
-  const skinMat = new THREE.MeshStandardMaterial({ color: skinCol, roughness: 0.68 });
-  const shirtMat = new THREE.MeshStandardMaterial({ color: topCol, roughness: 0.62 });
-  const pantsMat = new THREE.MeshStandardMaterial({ color: botCol, roughness: 0.74 });
-  const hairMat = new THREE.MeshStandardMaterial({ color: 0x1e1918, roughness: 0.8 });
-
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.72, 0.32), shirtMat);
-  torso.position.y = 1.18;
-  torso.castShadow = true;
-  g.add(torso);
-
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.19, 10, 8), skinMat);
-  head.position.y = 1.74;
-  g.add(head);
-
-  const hair = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.13, 0.36), hairMat);
-  hair.position.y = 1.9;
-  g.add(hair);
-
-  // Archetype accessories for unmistakable visual variety!
-  if (role === 'tourist') {
-    // Wide-brim straw sun hat + colorful shoulder bag
-    const hatMat = new THREE.MeshStandardMaterial({ color: 0xe8c987, roughness: 0.8 });
-    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.4, 0.05, 10), hatMat);
-    brim.position.y = 1.92;
-    const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.22, 0.14, 10), hatMat);
-    crown.position.y = 1.99;
-    const bag = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.32, 0.28), new THREE.MeshStandardMaterial({ color: 0xffbe55 }));
-    bag.position.set(0.36, 1.0, 0);
-    g.add(brim, crown, bag);
-  } else if (role === 'officer') {
-    // CDPD peaked police cap + gold chest badge
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.24, 0.12, 10), new THREE.MeshStandardMaterial({ color: 0x13264a }));
-    cap.position.y = 1.96;
-    const badge = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.11, 0.04), new THREE.MeshBasicMaterial({ color: 0xffd24d }));
-    badge.position.set(0.14, 1.32, 0.17);
-    g.add(cap, badge);
-  } else if (role === 'vendor') {
-    // Market vendor apron + red/gold bandana cap
-    const apron = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.62, 0.06), new THREE.MeshStandardMaterial({ color: 0xf4eee0, roughness: 0.8 }));
-    apron.position.set(0, 1.02, 0.17);
-    const bandana = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.12, 0.38), new THREE.MeshStandardMaterial({ color: 0xff5252 }));
-    bandana.position.y = 1.91;
-    g.add(apron, bandana);
-  } else if (role === 'commuter') {
-    // Briefcase / satchel
-    const brief = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.28, 0.38), new THREE.MeshStandardMaterial({ color: 0x3b2a20 }));
-    brief.position.set(0.42, 0.78, 0.04);
-    g.add(brief);
-  } else if (role === 'jogger') {
-    // Neon sweatband
-    const band = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.07, 0.38), new THREE.MeshBasicMaterial({ color: 0x34e0c8 }));
-    band.position.y = 1.85;
-    g.add(band);
-  } else if (role === 'enforcer') {
-    // Crimson Los Caimanes stripe + aviator shades
-    const lapel = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.56, 0.05), new THREE.MeshStandardMaterial({ color: 0xff4b5c }));
-    lapel.position.set(0, 1.18, 0.16);
-    g.add(lapel);
-  }
-
-  const legMat = role === 'beachgoer' || role === 'jogger' ? skinMat : pantsMat;
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.78, 0.22), legMat);
-  legL.position.set(-0.15, 0.42, 0);
-  const legR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.78, 0.22), legMat);
-  legR.position.set(0.15, 0.42, 0);
-
-  const armMat = role === 'beachgoer' || role === 'jogger' ? skinMat : shirtMat;
-  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.64, 0.18), armMat);
-  armL.position.set(-0.38, 1.16, 0);
-  const armR = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.64, 0.18), armMat);
-  armR.position.set(0.38, 1.16, 0);
-
-  g.add(legL, legR, armL, armR);
-  g.userData.limbs = { legL, legR, armL, armR };
-  return g;
+  return buildCharacterMesh({
+    jacket: topCol,
+    accent: accentCol,
+    pants: botCol,
+    skin: skinCol,
+    hair: isFemale ? 0x2c1b18 : 0x1e1918,
+    isFemale,
+    outfitStyle,
+    hairStyle: isFemale ? 'ponytail' : (role === 'officer' ? 'fade' : 'swept'),
+    accessory,
+    shortSleeves: role === 'beachgoer' || role === 'jogger' || role === 'tourist',
+    shorts: role === 'beachgoer' || role === 'jogger',
+    withWeapon: false,
+    role,
+  });
 }
 
 export function animatePedLimbs(mesh, t, panicked = false) {
-  const l = mesh.userData.limbs;
-  if (!l) return;
-  const swing = Math.sin(t) * (panicked ? 0.85 : 0.45);
-  l.legL.rotation.x = swing;
-  l.legR.rotation.x = -swing;
-  l.armL.rotation.x = panicked ? -2.4 + swing * 0.4 : -swing * 0.7;
-  l.armR.rotation.x = panicked ? -2.4 - swing * 0.4 : swing * 0.7;
+  poseHumanStride(mesh, t, panicked);
 }

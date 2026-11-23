@@ -70,6 +70,21 @@ export const GOLDEN_SHELLS = [
   { id: 'sh19', x: 255, z: -285 }, { id: 'sh20', x: 110, z: 165 },
 ];
 
+export const FISHING_SPOTS = [
+  { id: 'fish-marina', name: 'Bahia Esmeralda Pier', district: 'bahia-esmeralda', x: 225, z: 274, facing: 0 },
+  { id: 'fish-paseo', name: 'Paseo Dorado Pier', district: 'paseo-dorado', x: -210, z: 266, facing: 0 },
+];
+
+export const GARDEN_SITES = [
+  { id: 'garden-villas', name: 'Villas del Cabo Terrace', district: 'villas-del-cabo', x: -126, z: -242 },
+  { id: 'garden-loft', name: "Dante's Courtyard", district: 'barrio-viejo', x: 74, z: -242 },
+];
+
+export const ROOF_REPAIR_SITES = [
+  { id: 'roof-viejo-1', name: 'Barrio Viejo Plaza Roof', district: 'barrio-viejo', x: 118, z: -242, totalTiles: 6, payout: 1800 },
+  { id: 'roof-viejo-2', name: 'Barrio Viejo Courtyard Roof', district: 'barrio-viejo', x: 198, z: -244, totalTiles: 6, payout: 2100 },
+];
+
 export function getDistrictAt(x, z) {
   for (const d of DISTRICTS) {
     const b = d.bounds;

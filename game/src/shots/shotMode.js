@@ -1,8 +1,9 @@
 // Deterministic URL shot staging (?shot=chase|combat|career|title) using the live 3D game engine.
 
 import * as THREE from '../../vendor/three.module.min.js';
-import { updatePoliceLightbar, animateBurningWreck, createVehicleMesh } from '../entities/vehicleFactory.js';
+import { updatePoliceLightbar, animateBurningWreck, createVehicleMesh, applyVehicleMods } from '../entities/vehicleFactory.js';
 import { animatePedLimbs } from '../world/trafficAndPeds.js';
+import { poseHumanCombat } from '../entities/playerController.js';
 
 export function applyShotMode(engine, shotName) {
   if (!shotName) return false;
@@ -50,7 +51,11 @@ function setupChaseShot(engine) {
   s.activeWeaponIdx = 3; // Vector SMG
   s.radioStationIdx = 0; // Onda Sol FM 98.4
   s.radioTrackIdx = 0;
+  s.weaponWheelOpen = false;
+  engine.wheelShotRight = false;
   s.crewCooldowns = { nadia: 0, toma: 0, sora: 9 };
+  s.crewHealth = { nadia: 92, toma: 100, sora: 86 };
+  applyVehicleMods(engine.playerVehicle, s.carMods);
   s.dialogue = {
     speaker: 'NADIA SOLIS · WHEELWOMAN',
     portrait: 'nadia',
@@ -159,9 +164,14 @@ function setupCombatShot(engine) {
   s.missionStageIdx = 1; // Stage 2/3: Eliminate Los Caimanes enforcers
   s.missionTimer = 148;
   s.activeWeaponIdx = 3; // Vector SMG
+  s.weaponWheelOpen = true;
+  s.weaponWheelHoverIdx = 3; // Vector SMG highlighted on CS:GO Radial Weapon Wheel
+  engine.wheelShotRight = true;
   s.weaponAmmo.smg = { clip: 28, reserve: 180 };
   s.radioStationIdx = 1; // Neon Pulse FM 101.2
   s.crewCooldowns = { nadia: 0, toma: 0, sora: 0 };
+  s.crewHealth = { nadia: 88, toma: 100, sora: 94 };
+  engine.player.applyAppearance(s.playerAppearance);
   s.dialogue = {
     speaker: 'NADIA SOLIS · WHEELWOMAN',
     portrait: 'nadia',
@@ -172,22 +182,21 @@ function setupCombatShot(engine) {
   // Position Dante Varo on foot in Mercado Nocturno lantern alley facing north (-Z)
   const cx = -310;
   const cz = -55;
-  engine.player.pos.set(cx - 2.0, 0, cz + 14.5);
-  engine.player.yaw = Math.PI + 0.08;
+  engine.player.pos.set(cx - 2.1, 0, cz + 14.5);
+  engine.player.yaw = Math.PI + 0.04;
   engine.player.mesh.position.copy(engine.player.pos);
   engine.player.mesh.rotation.y = engine.player.yaw;
   engine.player.setVisible(true);
   engine.player.setCombatPose(true);
   engine.player.flashMuzzle(99);
 
-  // Crew partner Nadia Solis flanking right behind a crate, firing!
+  // Crew partner Nadia Solis flanking right behind a crate, realistic 2-segment combat aim pose!
   const nadia = engine.player.partnerMesh;
   nadia.visible = true;
-  nadia.position.set(cx + 3.2, 0, cz + 11.2);
-  nadia.rotation.y = Math.PI - 0.16;
-  nadia.userData.limbs.armR.rotation.x = -1.46;
-  nadia.userData.limbs.armL.rotation.x = -1.2;
-  nadia.userData.muzzleFlash.visible = true;
+  nadia.position.set(cx + 2.8, 0, cz + 11.4);
+  nadia.rotation.y = Math.PI - 0.14;
+  poseHumanCombat(nadia, true);
+  if (nadia.userData.muzzleFlash) nadia.userData.muzzleFlash.visible = true;
 
   // Move hero car parked behind cover
   engine.playerVehicle.pos.set(cx + 6.5, 0, cz + 25);
@@ -195,49 +204,48 @@ function setupCombatShot(engine) {
   engine.playerVehicle.mesh.position.copy(engine.playerVehicle.pos);
   engine.playerVehicle.mesh.rotation.y = 2.6;
 
-  // Attacking Los Caimanes Syndicate Enforcers at well-separated angles so every overhead threat marker + HP bar has generous spacing & zero overlap!
+  // Attacking Los Caimanes Syndicate Enforcers — e1 placed DEAD-CENTER on the camera optical axis, with clean horizontal separation for all 4!
   engine.combat.clearEnemies();
-  const e1 = engine.combat.spawnEnemy(cx - 3.2, cz - 5.4, 0.16, false, 100);
-  const e2 = engine.combat.spawnEnemy(cx + 3.3, cz - 7.0, -0.24, false, 100);
-  const e3 = engine.combat.spawnEnemy(cx - 8.6, cz - 9.4, 0.34, false, 100);
-  const e4 = engine.combat.spawnEnemy(cx + 8.8, cz - 10.6, -0.32, false, 100);
-  const downed = engine.combat.spawnEnemy(cx - 4.4, cz + 1.4, 1.35, true, 100);
-  downed.mesh.position.y = 0.18;
+  const e1 = engine.combat.spawnEnemy(cx - 0.4, cz - 4.2, 0.06, false, 100);
+  const e2 = engine.combat.spawnEnemy(cx + 4.4, cz - 7.8, -0.24, false, 100);
+  const e3 = engine.combat.spawnEnemy(cx - 4.8, cz - 7.6, 0.28, false, 100);
+  const e4 = engine.combat.spawnEnemy(cx - 8.6, cz - 3.6, 0.42, false, 100);
+  const downed = engine.combat.spawnEnemy(cx - 4.2, cz + 1.8, 1.35, true, 100);
+  downed.mesh.position.y = 0.16;
 
-  // Varied damaged HP so enemy HP bars look live & mid-firefight!
-  e1.hp = 64; e1.attacking = true; e1.mesh.userData.muzzleFlash.visible = true;
+  // Varied damaged HP so enemy HP bars look live & mid-firefight
+  e1.hp = 54; e1.attacking = true; e1.mesh.userData.muzzleFlash.visible = true;
   e2.hp = 42; e2.attacking = true; e2.mesh.userData.muzzleFlash.visible = true;
-  e3.hp = 88; e3.attacking = true;
+  e3.hp = 86; e3.attacking = true;
   e4.hp = 72; e4.attacking = true;
   s.missionEnemiesRemaining = 4;
 
-  // Dynamic Hit-Confirm Crosshair X active + 3 crisp, well-separated floating weapon damage numbers!
+  // Mathematically aim camera DEAD-CENTER on e1's upper chest/head (y = 1.44m) so reticle (50%, 50%) & hit-marker X sit DIRECTLY on e1!
+  const aimPoint = new THREE.Vector3(e1.pos.x, 1.44, e1.pos.z);
+  const danteMuzzle = engine.player.getMuzzleWorldPos();
+  nadia.updateMatrixWorld(true);
+  const nadiaMuzzle = new THREE.Vector3();
+  if (nadia.userData.muzzleFlash) nadia.userData.muzzleFlash.getWorldPosition(nadiaMuzzle);
+  else nadiaMuzzle.set(cx + 2.5, 1.38, cz + 10.6);
+
+  // Dynamic Hit-Confirm Crosshair X active on e1 + floating -46 CRIT! popup offset cleanly above-right of e1 so crosshair X stays 100% crisp & unobstructed!
   engine.combat.hitConfirmTimer = 0.24;
   engine.combat.hitConfirmCrit = true;
-  engine.combat.spawnDamagePopup(new THREE.Vector3(cx - 1.9, 1.72, cz - 5.0), 46, true, 'weapon');
-  engine.combat.spawnDamagePopup(new THREE.Vector3(cx + 2.1, 1.62, cz - 6.6), 34, false, 'weapon');
-  engine.combat.spawnDamagePopup(new THREE.Vector3(cx - 6.6, 1.52, cz - 8.6), 28, false, 'weapon');
+  engine.combat.spawnDamagePopup(new THREE.Vector3(e1.pos.x + 1.15, 1.92, e1.pos.z), 46, true, 'weapon');
+  engine.combat.spawnDamagePopup(new THREE.Vector3(e2.pos.x + 0.85, 1.86, e2.pos.z), 34, false, 'weapon');
 
-  // Blazing Additive Golden & Crimson Bullet Tracers + Cover Impact Sparks
+  // Blazing Additive Golden & Teal Bullet Tracers connecting cleanly from muzzles to exact impact points!
+  engine.combat.spawnTracer(danteMuzzle, aimPoint, 0xffe67a, 0.044, 9.0);
+  engine.combat.spawnTracer(nadiaMuzzle, new THREE.Vector3(e2.pos.x, 1.36, e2.pos.z), 0x5bf5df, 0.042, 9.0);
   engine.combat.spawnTracer(
-    new THREE.Vector3(cx - 1.5, 1.44, cz + 13.4),
-    new THREE.Vector3(cx - 3.0, 1.32, cz - 5.2),
-    0xffe67a, 0.044, 9.0
+    new THREE.Vector3(e2.pos.x - 0.2, 1.38, e2.pos.z + 0.4),
+    new THREE.Vector3(cx + 1.2, 1.72, cz + 11.4),
+    0xff5a3c, 0.038, 9.0
   );
-  engine.combat.spawnTracer(
-    new THREE.Vector3(cx + 2.85, 1.4, cz + 10.2),
-    new THREE.Vector3(cx + 3.1, 1.28, cz - 6.8),
-    0x5bf5df, 0.042, 9.0
-  );
-  engine.combat.spawnTracer(
-    new THREE.Vector3(cx - 2.9, 1.42, cz - 4.8),
-    new THREE.Vector3(cx + 1.4, 1.85, cz + 11.5),
-    0xff5a3c, 0.04, 9.0
-  );
-  engine.combat.spawnSparks(new THREE.Vector3(cx - 3.1, 1.35, cz - 5.3), 12, 0xffc857);
-  engine.combat.spawnSparks(new THREE.Vector3(cx + 3.2, 1.25, cz - 6.9), 10, 0xff7846);
+  engine.combat.spawnSparks(aimPoint, 14, 0xffc857);
+  engine.combat.spawnSparks(new THREE.Vector3(e2.pos.x, 1.36, e2.pos.z), 10, 0xff7846);
 
-  // Lively Mercado Nocturno crowd: vendors behind stalls + scattering shoppers + CDPD foot officers
+  // Lively Mercado Nocturno crowd: vendors behind stalls + scattering shoppers
   const alleyBystanders = [
     [cx - 9.4, cz - 2.0, -1.4, true], [cx + 9.6, cz - 3.5, 1.5, true],
     [cx - 9.2, cz + 4.8, -1.2, true], [cx + 9.4, cz + 6.5, 1.4, true],
@@ -257,18 +265,17 @@ function setupCombatShot(engine) {
   const p2 = engine.police.spawnUnit('SOL-04', false, cx + 10.5, cz - 40, -0.6, 'CLOSING IN');
   updatePoliceLightbar(p1.mesh, 12.4, 0.2);
   updatePoliceLightbar(p2.mesh, 12.4, 2.0);
-  engine.police.chatterLine = 'DISPATCH: Shots fired in Mercado Nocturno — units closing!';
 
   // Parked dark Los Caimanes coupe for mid-alley cover
   const enemyCoupe = createVehicleMesh('cabo_gt', 0x1a2836);
-  enemyCoupe.position.set(cx + 5.8, 0, cz - 14.5);
+  enemyCoupe.position.set(cx + 5.8, 0, cz - 16.5);
   enemyCoupe.rotation.y = 0.52;
   engine.scene.add(enemyCoupe);
 
-  // Over-the-shoulder action camera framing Dante, Nadia, attacking enemies + overhead markers + hit-confirm + floating damage numbers + lanterns!
+  // Over-the-shoulder action camera looking DIRECTLY at aimPoint (e1's upper chest -> exact 50%, 50% crosshair!)
   engine.cameraOverride = {
-    pos: new THREE.Vector3(cx - 0.1, 2.35, cz + 19.2),
-    lookAt: new THREE.Vector3(cx - 0.3, 2.75, cz - 16.0),
+    pos: new THREE.Vector3(cx - 0.15, 2.05, cz + 18.6),
+    lookAt: aimPoint.clone(),
   };
 
   const dispatch = engine.police.buildDispatchRoster(engine.player.pos, engine.heli, s);
@@ -282,6 +289,8 @@ function setupCombatShot(engine) {
 function setupCareerShot(engine) {
   const s = engine.state;
   s.timeOfDay = 18.7;
+  s.weaponWheelOpen = false;
+  engine.wheelShotRight = false;
   s.cash = 142850;
   s.rp = 7650;
   s.activeMissionId = 'm5';
@@ -303,6 +312,8 @@ function setupCareerShot(engine) {
 function setupTitleShot(engine) {
   const s = engine.state;
   s.timeOfDay = 18.65;
+  s.weaponWheelOpen = false;
+  engine.wheelShotRight = false;
   engine.police.clearAll();
   engine.combat.clearEnemies();
   engine.heli.mesh.visible = false;

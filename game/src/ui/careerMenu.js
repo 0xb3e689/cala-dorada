@@ -1,11 +1,13 @@
-// ESC / M Pause & Career Dossier menu with tabs (including PROPERTIES), completion donut, medal strip, interactive city map, empire income stats, and 3 save slots.
+// Clean AAA Pause / Career / Map / Garage / Wardrobe / Activities / Properties / Stats / Save menu (zero AI-slop text).
 
-import { DISTRICTS, MISSIONS, CREW, PROPERTIES } from '../core/config.js';
+import {
+  DISTRICTS, MISSIONS, PROPERTIES, CAR_PAINTS, CAR_SPOILERS, CAR_UNDERGLOWS, CAR_RIMS,
+  WARDROBE_OPTIONS, GARDEN_CROPS,
+} from '../core/config.js';
 import { computeCompletionPercent, getRankInfo, getEmpireIncomePerHour } from '../core/gameState.js';
-import { ROAD_X, ROAD_Z, LANDMARKS, STREET_RACES, computeGpsPath } from '../world/cityPlan.js';
-import { renderPortraitSvg } from './portraitArt.js';
+import { ROAD_X, ROAD_Z, LANDMARKS, STREET_RACES, FISHING_SPOTS, GARDEN_SITES, ROOF_REPAIR_SITES, computeGpsPath } from '../world/cityPlan.js';
 
-const TABS = ['MAP', 'PROPERTIES', 'STORY', 'STATS', 'CREW', 'SETTINGS', 'CONTROLS', 'SAVE'];
+const TABS = ['MAP', 'GARAGE', 'WARDROBE', 'ACTIVITIES', 'PROPERTIES', 'STATS', 'SAVE'];
 
 export class CareerMenu {
   constructor(callbacks) {
@@ -33,67 +35,189 @@ export class CareerMenu {
 
     const topBar = `
       <div class="glass-card career-topbar">
-        <div class="career-brand">CALA DORADA · SYNDICATE DOSSIER</div>
+        <div class="career-brand">CALA DORADA</div>
         <div class="career-tabs">${tabsHtml}</div>
         <div class="career-right-meta">
           <span class="cash-display" style="font-size:15px">$${Math.round(state.cash).toLocaleString()}</span>
-          <button class="resume-btn" id="btn-resume">[ESC] RESUME</button>
+          <button class="resume-btn" id="btn-resume">RESUME</button>
         </div>
       </div>`;
 
     let bodyHtml = '';
     if (this.activeTab === 'MAP' || this.activeTab === 'STATS' || this.activeTab === 'SAVE') {
       bodyHtml = this._renderUnifiedOverview(state, pct, rank, empireHr, saveManager);
+    } else if (this.activeTab === 'GARAGE') {
+      bodyHtml = this._renderGarageTab(state);
+    } else if (this.activeTab === 'WARDROBE') {
+      bodyHtml = this._renderWardrobeTab(state);
+    } else if (this.activeTab === 'ACTIVITIES') {
+      bodyHtml = this._renderActivitiesTab(state);
     } else if (this.activeTab === 'PROPERTIES') {
       bodyHtml = `<div class="glass-card full-tab-panel">${PROPERTIES.map((p) => {
         const owned = state.ownedProperties?.has(p.id);
         return `<div class="info-card" style="border-color:${owned ? p.color : 'rgba(255,255,255,0.14)'}">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
             <h3 style="margin:0;color:${p.color}">${p.name}</h3>
             <span style="font-size:10px;font-weight:900;padding:2px 7px;border-radius:4px;background:${owned ? 'rgba(66,227,140,0.2)' : 'rgba(255,190,85,0.18)'};color:${owned ? '#42e38c' : '#ffbe55'}">${owned ? 'OWNED' : `$${p.price.toLocaleString()}`}</span>
           </div>
           <p><strong>${p.districtLabel} · ${p.badge}</strong>${p.incomePerHr > 0 ? ` · <span style="color:#42e38c">$${p.incomePerHr.toLocaleString()}/hr</span>` : ''}<br>${p.perks}</p>
-          <div style="margin-top:8px"><button class="btn-xs alt" data-prop-gps="${p.id}">SET GPS WAYPOINT</button></div>
+          <div><button class="btn-xs alt" data-prop-gps="${p.id}">SET GPS</button></div>
         </div>`;
       }).join('')}</div>`;
-    } else if (this.activeTab === 'STORY') {
-      bodyHtml = `<div class="glass-card full-tab-panel">${MISSIONS.map((m) => {
-        const medal = state.completedMissions[m.id];
-        const active = m.id === state.activeMissionId;
-        return `<div class="info-card" style="${active ? 'border-color:#ffbe55' : ''}">
-          <h3>Mission ${m.number}: ${m.title} ${medal ? `· [${medal}]` : active ? '· [ACTIVE]' : ''}</h3>
-          <p><strong>${m.act} · ${m.district}</strong> — Payout $${m.cash.toLocaleString()} & ${m.rp} RP.<br>
-          ${m.stages.map((s, i) => `${i + 1}. ${s.label}`).join('<br>')}</p>
-        </div>`;
-      }).join('')}</div>`;
-    } else if (this.activeTab === 'CREW') {
-      bodyHtml = `<div class="glass-card full-tab-panel">${CREW.map((c) => `
-        <div class="info-card" style="display:flex;gap:12px;align-items:center">
-          <div style="width:64px;height:64px;border-radius:10px;overflow:hidden;flex-shrink:0;border:1.5px solid ${c.color}">${renderPortraitSvg(c.id)}</div>
-          <div>
-            <h3>${c.name} — ${c.role}</h3>
-            <p><strong>[${c.key}] ${c.ability}</strong> (Cooldown ${c.cooldown}s)<br>${c.desc}</p>
-          </div>
-        </div>`).join('')}</div>`;
-    } else if (this.activeTab === 'CONTROLS') {
-      bodyHtml = `<div class="glass-card full-tab-panel">
-        <div class="info-card"><h3>Driving Controls</h3><p><b>W/A/S/D or Arrows</b>: Drive & Steer<br><b>Space</b>: Handbrake Drift<br><b>Shift</b>: Nitro Boost<br><b>F</b>: Enter / Exit Vehicle<br><b>V</b>: Cycle Camera Mode<br><b>R</b>: Switch Radio Station</p></div>
-        <div class="info-card"><h3>On-Foot & Combat</h3><p><b>W/A/S/D</b>: Move · <b>Shift</b>: Sprint · <b>Space</b>: Jump<br><b>Left Click</b>: Fire Weapon / Melee<br><b>Right Drag</b>: Aim Camera<br><b>1 – 6</b>: Select Weapon Slot</p></div>
-        <div class="info-card"><h3>Crew & Properties</h3><p><b>Z</b>: Nadia Plate Swap (-2 Stars)<br><b>X</b>: Toma Field Repair & Nitro<br><b>C</b>: Sora Signal Jam (14s)<br><b>E</b>: Buy / Enter Property, Shop, or Race<br><b>ESC / M</b>: Syndicate Dossier & Map</p></div>
-      </div>`;
-    } else if (this.activeTab === 'SETTINGS') {
-      bodyHtml = `<div class="glass-card full-tab-panel">
-        <div class="info-card"><h3>Audio & Radio</h3><p>SFX Volume: ${Math.round(state.settings.sfxVolume * 100)}%<br>Radio Volume: ${Math.round(state.settings.radioVolume * 100)}%<br>Press [R] in-game to switch between Onda Sol, Neon Pulse, Bahia Dub, and CDPD Scanner.</p></div>
-        <div class="info-card"><h3>Time of Day</h3><p>Quick-cycle Cala Dorada lighting:<br><br>
-          <button class="btn-xs" data-tod="18.7">Golden Hour (18:42)</button>
-          <button class="btn-xs alt" data-tod="21.8">Neon Night (21:48)</button>
-          <button class="btn-xs alt" data-tod="13.5">High Noon (13:30)</button></p></div>
-      </div>`;
     }
 
     this.el.innerHTML = topBar + bodyHtml;
+    this._bindEvents(state, playerPos, missionTarget, saveManager);
+  }
 
-    // Bind events
+  _renderGarageTab(state) {
+    const mods = state.carMods;
+    const paintBtns = CAR_PAINTS.map((p) => `
+      <button class="swatch-btn ${mods.paint === p.hex ? 'active' : ''}" data-car-mod="paint" data-val="${p.hex}" data-cost="${p.price}">
+        <span class="swatch-dot" style="background:${p.hex}"></span>${p.name}
+      </button>`).join('');
+
+    const finishBtns = ['metallic', 'matte'].map((f) => `
+      <button class="swatch-btn ${mods.finish === f ? 'active' : ''}" data-car-mod="finish" data-val="${f}" data-cost="400">
+        ${f.toUpperCase()}
+      </button>`).join('');
+
+    const spoilerBtns = CAR_SPOILERS.map((s) => `
+      <button class="swatch-btn ${mods.spoiler === s.id ? 'active' : ''}" data-car-mod="spoiler" data-val="${s.id}" data-cost="${s.price}">
+        ${s.name}${s.price ? ` ($${s.price})` : ''}
+      </button>`).join('');
+
+    const glowBtns = CAR_UNDERGLOWS.map((u) => `
+      <button class="swatch-btn ${(mods.underglow === (u.hex ?? 'off')) ? 'active' : ''}" data-car-mod="underglow" data-val="${u.hex ?? 'off'}" data-cost="${u.price}">
+        ${u.hex ? `<span class="swatch-dot" style="background:${u.hex}"></span>` : ''}${u.name}
+      </button>`).join('');
+
+    const rimBtns = CAR_RIMS.map((r) => `
+      <button class="swatch-btn ${mods.rims === r.hex ? 'active' : ''}" data-car-mod="rims" data-val="${r.hex}" data-cost="${r.price}">
+        <span class="swatch-dot" style="background:${r.hex}"></span>${r.name}
+      </button>`).join('');
+
+    const turboLvl = mods.turboLevel ?? 1;
+    const armorLvl = mods.armorLevel ?? 1;
+
+    return `<div class="glass-card full-tab-panel">
+      <div class="info-card">
+        <h3>Paint & Finish</h3>
+        <div class="swatch-row">${paintBtns}</div>
+        <div class="swatch-row">${finishBtns}</div>
+      </div>
+      <div class="info-card">
+        <h3>Aero Spoiler</h3>
+        <div class="swatch-row">${spoilerBtns}</div>
+        <h3 style="margin-top:6px">Neon Underglow</h3>
+        <div class="swatch-row">${glowBtns}</div>
+      </div>
+      <div class="info-card">
+        <h3>Wheel Rims</h3>
+        <div class="swatch-row">${rimBtns}</div>
+        <h3 style="margin-top:6px">Performance Upgrades</h3>
+        <div class="plot-row">
+          <span>Engine Turbo · Lv.${turboLvl}/3</span>
+          ${turboLvl < 3 ? `<button class="btn-xs" data-car-mod="turboLevel" data-val="${turboLvl + 1}" data-cost="${turboLvl * 3500}">UPGRADE $${(turboLvl * 3500).toLocaleString()}</button>` : '<span style="color:#42e38c;font-size:10px;font-weight:900">MAXED</span>'}
+        </div>
+        <div class="plot-row">
+          <span>Chassis Armor · Lv.${armorLvl}/3</span>
+          ${armorLvl < 3 ? `<button class="btn-xs" data-car-mod="armorLevel" data-val="${armorLvl + 1}" data-cost="${armorLvl * 4200}">UPGRADE $${(armorLvl * 4200).toLocaleString()}</button>` : '<span style="color:#42e38c;font-size:10px;font-weight:900">MAXED</span>'}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  _renderWardrobeTab(state) {
+    const app = state.playerAppearance;
+    const mkBtns = (field, list, isColor = false) => list.map((it) => {
+      const val = isColor ? it.hex : it.id;
+      const active = app[field] === val;
+      return `<button class="swatch-btn ${active ? 'active' : ''}" data-app-field="${field}" data-val="${val}">
+        ${isColor ? `<span class="swatch-dot" style="background:${it.hex}"></span>` : ''}${it.name}
+      </button>`;
+    }).join('');
+
+    return `<div class="glass-card full-tab-panel">
+      <div class="info-card">
+        <h3>Outfit Style</h3>
+        <div class="swatch-row">${mkBtns('outfitStyle', WARDROBE_OPTIONS.outfits)}</div>
+        <h3 style="margin-top:6px">Jacket Color</h3>
+        <div class="swatch-row">${mkBtns('jacketColor', WARDROBE_OPTIONS.jacketColors, true)}</div>
+        <h3 style="margin-top:6px">Pants Color</h3>
+        <div class="swatch-row">${mkBtns('pantsColor', WARDROBE_OPTIONS.pantsColors, true)}</div>
+      </div>
+      <div class="info-card">
+        <h3>Hair Style</h3>
+        <div class="swatch-row">${mkBtns('hairStyle', WARDROBE_OPTIONS.hairStyles)}</div>
+        <h3 style="margin-top:6px">Hair Color</h3>
+        <div class="swatch-row">${mkBtns('hairColor', WARDROBE_OPTIONS.hairColors, true)}</div>
+      </div>
+      <div class="info-card">
+        <h3>Skin Tone</h3>
+        <div class="swatch-row">${mkBtns('skinTone', WARDROBE_OPTIONS.skinTones, true)}</div>
+        <h3 style="margin-top:6px">Accessories</h3>
+        <div class="swatch-row">${mkBtns('accessory', WARDROBE_OPTIONS.accessories)}</div>
+      </div>
+    </div>`;
+  }
+
+  _renderActivitiesTab(state) {
+    const fishRows = FISHING_SPOTS.map((f) => `
+      <div class="plot-row">
+        <span>${f.name}</span>
+        <div style="display:flex;gap:5px">
+          <button class="btn-xs alt" data-gps-x="${f.x}" data-gps-z="${f.z}" data-gps-lbl="${f.name}">GPS</button>
+          <button class="btn-xs" data-start-fish="${f.id}">FISH</button>
+        </div>
+      </div>`).join('');
+
+    const gardenRows = (state.gardenPlots ?? []).map((p) => {
+      const crop = GARDEN_CROPS.find((c) => c.id === p.cropId);
+      const status = !crop ? 'Empty Soil' : p.stage >= 3 ? `${crop.name} · Ready` : `${crop.name} · Stage ${p.stage}/3`;
+      let actionHtml = '';
+      if (!crop) {
+        actionHtml = GARDEN_CROPS.slice(0, 2).map((c) =>
+          `<button class="btn-xs alt" data-plant-plot="${p.id}" data-crop="${c.id}">+${c.name.split(' ')[0]}</button>`
+        ).join('');
+      } else if (p.stage < 3) {
+        actionHtml = `<button class="btn-xs alt" data-water-plot="${p.id}">WATER</button>`;
+      } else {
+        actionHtml = `<button class="btn-xs" data-harvest-plot="${p.id}">HARVEST $${crop.sellValue}</button>`;
+      }
+      return `<div class="plot-row"><span style="font-size:10.5px">${status}</span><div style="display:flex;gap:4px">${actionHtml}</div></div>`;
+    }).join('');
+
+    const roofRows = ROOF_REPAIR_SITES.map((r) => {
+      const done = state.roofProgress?.[r.id] ?? 0;
+      return `<div class="plot-row">
+        <span>${r.name} (${done}/${r.totalTiles})</span>
+        <div style="display:flex;gap:5px">
+          <button class="btn-xs alt" data-gps-x="${r.x}" data-gps-z="${r.z}" data-gps-lbl="${r.name}">GPS</button>
+          <button class="btn-xs" data-start-roof="${r.id}">REPAIR</button>
+        </div>
+      </div>`;
+    }).join('');
+
+    return `<div class="glass-card full-tab-panel">
+      <div class="info-card">
+        <h3>Coastal Fishing (${state.careerStats.fishCaught ?? 0} Caught)</h3>
+        <p>Golden Snapper, Mahi-Mahi, Barracuda & Reef Grouper along Cala Dorada's wooden piers.</p>
+        ${fishRows}
+      </div>
+      <div class="info-card">
+        <h3>Courtyard & Villa Gardening (${state.careerStats.cropsHarvested ?? 0} Harvested)</h3>
+        ${gardenRows}
+      </div>
+      <div class="info-card">
+        <h3>Barrio Viejo Roof Repair (${state.careerStats.roofsRepaired ?? 0} Restored)</h3>
+        <p>Restore damaged terracotta roof tiles in Barrio Viejo for cash and neighborhood standing.</p>
+        ${roofRows}
+      </div>
+    </div>`;
+  }
+
+  _bindEvents(state, playerPos, missionTarget, saveManager) {
     this.el.querySelectorAll('[data-tab]').forEach((btn) => {
       btn.addEventListener('click', () => {
         this.activeTab = btn.dataset.tab;
@@ -114,6 +238,61 @@ export class CareerMenu {
       });
     });
 
+    this.el.querySelectorAll('[data-gps-x]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.customWaypoint = { x: Number(btn.dataset.gpsX), z: Number(btn.dataset.gpsZ), label: btn.dataset.gpsLbl };
+        this.activeTab = 'MAP';
+        this.render(state, playerPos, missionTarget, saveManager);
+      });
+    });
+
+    this.el.querySelectorAll('[data-car-mod]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const cat = btn.dataset.carMod;
+        const val = (cat === 'turboLevel' || cat === 'armorLevel') ? Number(btn.dataset.val) : btn.dataset.val;
+        const cost = Number(btn.dataset.cost ?? 0);
+        if (this.cb.onCarMod) this.cb.onCarMod(cat, val, cost);
+        this.render(state, playerPos, missionTarget, saveManager);
+      });
+    });
+
+    this.el.querySelectorAll('[data-app-field]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (this.cb.onAppearanceMod) this.cb.onAppearanceMod(btn.dataset.appField, btn.dataset.val);
+        this.render(state, playerPos, missionTarget, saveManager);
+      });
+    });
+
+    this.el.querySelectorAll('[data-plant-plot]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (this.cb.onGardenAction) this.cb.onGardenAction('plant', btn.dataset.plantPlot, btn.dataset.crop);
+        this.render(state, playerPos, missionTarget, saveManager);
+      });
+    });
+    this.el.querySelectorAll('[data-water-plot]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (this.cb.onGardenAction) this.cb.onGardenAction('water', btn.dataset.waterPlot);
+        this.render(state, playerPos, missionTarget, saveManager);
+      });
+    });
+    this.el.querySelectorAll('[data-harvest-plot]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (this.cb.onGardenAction) this.cb.onGardenAction('harvest', btn.dataset.harvestPlot);
+        this.render(state, playerPos, missionTarget, saveManager);
+      });
+    });
+
+    this.el.querySelectorAll('[data-start-fish]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (this.cb.onStartFishing) this.cb.onStartFishing(btn.dataset.startFish);
+      });
+    });
+    this.el.querySelectorAll('[data-start-roof]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (this.cb.onStartRoof) this.cb.onStartRoof(btn.dataset.startRoof);
+      });
+    });
+
     this.el.querySelectorAll('[data-save]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const slot = Number(btn.dataset.save);
@@ -126,14 +305,9 @@ export class CareerMenu {
       btn.addEventListener('click', () => {
         const slot = Number(btn.dataset.load);
         if (saveManager.loadSlot(slot, state)) {
+          if (this.cb.onSlotLoaded) this.cb.onSlotLoaded();
           this.cb.onResume();
         }
-      });
-    });
-    this.el.querySelectorAll('[data-tod]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        state.timeOfDay = Number(btn.dataset.tod);
-        this.cb.onTimeChanged();
       });
     });
 
@@ -146,7 +320,7 @@ export class CareerMenu {
         const ny = (ev.clientY - rect.top) / rect.height;
         const wx = -470 + nx * 950;
         const wz = -455 + ny * 760;
-        state.customWaypoint = { x: Math.round(wx), z: Math.round(wz), label: 'GPS Pin' };
+        state.customWaypoint = { x: Math.round(wx), z: Math.round(wz), label: 'Waypoint' };
         this._drawFullCityMap(mapCanvas, state, playerPos, missionTarget);
       });
     }
@@ -174,21 +348,21 @@ export class CareerMenu {
     ];
 
     const medalsHtml = MISSIONS.map((m) => {
-      const g = state.completedMissions[m.id] ?? (m.id === state.activeMissionId ? 'LIVE' : '—');
-      return `<div class="medal-chip ${g}">
+      const done = state.completedMissions[m.id];
+      const isActive = !done && m.id === state.activeMissionId;
+      const cls = done ?? (isActive ? 'ACTIVE' : '');
+      const text = done ?? (isActive ? '●' : '—');
+      return `<div class="medal-chip ${cls}">
         <div class="medal-m">M${m.number}</div>
-        <div class="medal-grade">${g}</div>
+        <div class="medal-grade">${text}</div>
       </div>`;
     }).join('');
-
-    const hrs = Math.floor(state.careerStats.playtimeSec / 3600);
-    const mins = Math.floor((state.careerStats.playtimeSec % 3600) / 60);
 
     const slotsHtml = saveManager.getAllSlots().map(({ slot, data }) => `
       <div class="save-row ${slot === state.activeSlot ? 'current' : ''}">
         <div class="save-info">
-          <div class="save-title">Slot ${slot} · ${data ? `${data.act} · ${data.completion.toFixed(1)}%` : 'Empty Slot'}</div>
-          <div class="save-sub">${data ? `${data.missionTitle} · $${data.cash.toLocaleString()}` : 'Ready to save current progress'}</div>
+          <div class="save-title">Slot ${slot} · ${data ? `${data.act} · ${data.completion.toFixed(1)}%` : 'Empty'}</div>
+          <div class="save-sub">${data ? `${data.missionTitle} · $${data.cash.toLocaleString()}` : 'No saved data'}</div>
         </div>
         <div class="save-actions">
           <button class="btn-xs" data-save="${slot}">SAVE</button>
@@ -198,10 +372,10 @@ export class CareerMenu {
 
     return `
     <div class="career-grid">
-      <!-- LEFT COLUMN: Completion Donut + Checklist (incl. Properties Owned) + Mission Medals -->
+      <!-- LEFT COLUMN: Completion Donut + Checklist + Mission Medals -->
       <div class="career-col">
         <div class="glass-card panel-box">
-          <div class="panel-hdr"><span>CAREER PROGRESS</span><span>GOLD COAST</span></div>
+          <div class="panel-hdr"><span>CAREER PROGRESS</span></div>
           <div class="donut-wrap">
             <svg class="donut-svg" viewBox="0 0 84 84">
               <circle cx="42" cy="42" r="${r}" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="8"/>
@@ -217,7 +391,7 @@ export class CareerMenu {
             <div>
               <div class="donut-big">${pct.toFixed(1)}%</div>
               <div class="donut-lbl">COMPLETE</div>
-              <div style="font-size:10px;color:#b4bfd4;margin-top:2px">Act II · Syndicate Rising</div>
+              <div style="font-size:10px;color:#b4bfd4;margin-top:2px">Act II</div>
             </div>
           </div>
           <div class="check-list">
@@ -230,54 +404,53 @@ export class CareerMenu {
         </div>
 
         <div class="glass-card panel-box">
-          <div class="panel-hdr"><span>MISSION MEDALS</span><span>${mDone}/8 CLEARED</span></div>
+          <div class="panel-hdr"><span>MISSION MEDALS</span><span>${mDone}/8</span></div>
           <div class="medal-strip">${medalsHtml}</div>
         </div>
       </div>
 
-      <!-- CENTER COLUMN: Interactive Full-City District & Property Map -->
+      <!-- CENTER COLUMN: Interactive Full-City District, Property & Activity Map -->
       <div class="glass-card map-panel">
         <div class="panel-hdr">
-          <span>CALA DORADA · INTERACTIVE TACTICAL MAP</span>
-          <span style="color:#34e0c8;font-size:10px">CLICK ANYWHERE TO SET GPS WAYPOINT</span>
+          <span>CITY MAP</span>
         </div>
         <canvas id="full-map-canvas" width="660" height="460"></canvas>
         <div class="map-legend">
           <span><span class="leg-dot" style="background:#ffffff"></span>Player</span>
-          <span><span class="leg-dot" style="background:#ffbe55"></span>Story Mission</span>
+          <span><span class="leg-dot" style="background:#ffbe55"></span>Mission</span>
           <span><span class="leg-dot" style="background:#e85aff"></span>GPS Pin</span>
-          <span><span class="leg-dot" style="background:#42e38c"></span>Owned Property</span>
-          <span><span class="leg-dot" style="background:transparent;border:2px solid #ffbe55"></span>For Sale</span>
-          <span><span class="leg-dot" style="background:#34e0c8"></span>Races</span>
-          <span><span class="leg-dot" style="background:#e04f44"></span>Puente del Sol</span>
+          <span><span class="leg-dot" style="background:#42e38c"></span>Property</span>
+          <span><span class="leg-dot" style="background:#38bdf8"></span>Fishing</span>
+          <span><span class="leg-dot" style="background:#a3e635"></span>Garden</span>
+          <span><span class="leg-dot" style="background:#fb923c"></span>Roof Repair</span>
         </div>
       </div>
 
-      <!-- RIGHT COLUMN: Rank/RP + Career & Empire Income Stats + Save Slots -->
+      <!-- RIGHT COLUMN: Rank/RP + Career & Activities Counters + Save Slots -->
       <div class="career-col">
         <div class="glass-card panel-box">
           <div class="panel-hdr"><span>SYNDICATE RANK</span><span>RANK ${rank.rank}</span></div>
-          <div style="font-size:15px;font-weight:900;color:#fff">${rank.title}</div>
+          <div style="font-size:14.5px;font-weight:900;color:#fff">${rank.title}</div>
           <div class="bar-track"><div class="bar-fill" style="width:${Math.round(rank.progress * 100)}%;background:linear-gradient(90deg,#ff7846,#ffbe55)"></div></div>
-          <div style="font-size:10px;color:#b4bfd4;display:flex;justify-content:space-between">
-            <span>${rank.rp.toLocaleString()} RP</span><span>NEXT: ${rank.nextRp.toLocaleString()} RP</span>
+          <div style="font-size:10px;color:#b4bfd4;font-family:var(--font-mono)">
+            ${rank.rp.toLocaleString()} / ${rank.nextRp.toLocaleString()} RP
           </div>
         </div>
 
         <div class="glass-card panel-box">
-          <div class="panel-hdr"><span>CAREER & EMPIRE</span><span style="color:#42e38c">$${empireHr.toLocaleString()}/HR</span></div>
+          <div class="panel-hdr"><span>CAREER STATS</span><span style="color:#42e38c">$${empireHr.toLocaleString()}/HR</span></div>
           <div class="stats-grid">
-            <div class="stat-tile"><div class="stat-k">Empire Income</div><div class="stat-v" style="color:#42e38c">$${empireHr.toLocaleString()}/hr</div></div>
             <div class="stat-tile"><div class="stat-k">Cash Earned</div><div class="stat-v" style="color:#ffd24d">$${state.careerStats.cashEarned.toLocaleString()}</div></div>
-            <div class="stat-tile"><div class="stat-k">Pursuits Evaded</div><div class="stat-v">${state.careerStats.pursuitsEvaded}</div></div>
             <div class="stat-tile"><div class="stat-k">Top Speed</div><div class="stat-v">${state.careerStats.topSpeedMph} MPH</div></div>
-            <div class="stat-tile"><div class="stat-k">Takedowns</div><div class="stat-v">${state.careerStats.takedowns}</div></div>
-            <div class="stat-tile"><div class="stat-k">Playtime</div><div class="stat-v">${hrs}h ${mins}m</div></div>
+            <div class="stat-tile"><div class="stat-k">Car Mods</div><div class="stat-v" style="color:#34e0c8">${state.careerStats.carModsInstalled ?? 0}</div></div>
+            <div class="stat-tile"><div class="stat-k">Fish Caught</div><div class="stat-v" style="color:#38bdf8">${state.careerStats.fishCaught ?? 0}</div></div>
+            <div class="stat-tile"><div class="stat-k">Crops Harvested</div><div class="stat-v" style="color:#a3e635">${state.careerStats.cropsHarvested ?? 0}</div></div>
+            <div class="stat-tile"><div class="stat-k">Roofs Repaired</div><div class="stat-v" style="color:#fb923c">${state.careerStats.roofsRepaired ?? 0}</div></div>
           </div>
         </div>
 
         <div class="glass-card panel-box">
-          <div class="panel-hdr"><span>SAVE SLOTS</span><span>LOCAL STORAGE</span></div>
+          <div class="panel-hdr"><span>SAVE SLOTS</span></div>
           <div class="save-list">${slotsHtml}</div>
         </div>
       </div>
@@ -291,7 +464,6 @@ export class CareerMenu {
     const mapX = (wx) => ((wx + 470) / 950) * W;
     const mapY = (wz) => ((wz + 455) / 760) * H;
 
-    // Deep coastal ocean gradient
     const seaGrad = ctx.createLinearGradient(0, 0, 0, H);
     seaGrad.addColorStop(0, '#071b2b');
     seaGrad.addColorStop(0.75, '#0b2d42');
@@ -299,7 +471,6 @@ export class CareerMenu {
     ctx.fillStyle = seaGrad;
     ctx.fillRect(0, 0, W, H);
 
-    // Subtle nautical grid lines
     ctx.strokeStyle = 'rgba(100, 195, 225, 0.06)';
     ctx.lineWidth = 1;
     for (let gx = 0; gx < W; gx += 44) {
@@ -309,7 +480,6 @@ export class CareerMenu {
       ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
     }
 
-    // Coastal turquoise shallow shelf aura
     ctx.fillStyle = 'rgba(52, 224, 200, 0.14)';
     ctx.beginPath();
     ctx.moveTo(mapX(-460), mapY(258));
@@ -323,7 +493,6 @@ export class CareerMenu {
     ctx.closePath();
     ctx.fill();
 
-    // Organic Coastal Landmass silhouette
     ctx.fillStyle = '#152031';
     ctx.beginPath();
     ctx.moveTo(mapX(-450), mapY(-442));
@@ -337,7 +506,6 @@ export class CareerMenu {
     ctx.closePath();
     ctx.fill();
 
-    // Golden beach shoreline curves
     ctx.fillStyle = '#b8965d';
     ctx.beginPath();
     ctx.moveTo(mapX(-450), mapY(224));
@@ -355,17 +523,15 @@ export class CareerMenu {
     ctx.closePath();
     ctx.fill();
 
-    // Marina wooden piers
     ctx.strokeStyle = '#c49d68';
     ctx.lineWidth = 3;
-    for (const px of [215, 245, 275]) {
+    for (const px of [-210, 225, 255]) {
       ctx.beginPath();
       ctx.moveTo(mapX(px), mapY(248));
-      ctx.lineTo(mapX(px), mapY(274));
+      ctx.lineTo(mapX(px), mapY(276));
       ctx.stroke();
     }
 
-    // 7 Color-Coded Districts
     for (const d of DISTRICTS) {
       const x1 = mapX(d.bounds.x1);
       const y1 = mapY(d.bounds.z1);
@@ -380,12 +546,6 @@ export class CareerMenu {
       ctx.setLineDash([]);
     }
 
-    // Greenbelt parks
-    ctx.fillStyle = 'rgba(66, 227, 140, 0.14)';
-    ctx.fillRect(mapX(-340), mapY(-370), mapX(-215) - mapX(-340), mapY(-285) - mapY(-370));
-    ctx.fillRect(mapX(-40), mapY(-35), mapX(40) - mapX(-40), mapY(35) - mapY(-35));
-
-    // Building footprints
     ctx.fillStyle = 'rgba(220, 234, 255, 0.08)';
     for (let bx = -390; bx <= 380; bx += 52) {
       for (let bz = -395; bz <= 165; bz += 52) {
@@ -396,7 +556,6 @@ export class CareerMenu {
       }
     }
 
-    // Road Grid
     ctx.strokeStyle = '#334257';
     ctx.lineWidth = 7.5;
     ctx.beginPath();
@@ -410,22 +569,6 @@ export class CareerMenu {
     }
     ctx.stroke();
 
-    ctx.strokeStyle = 'rgba(255, 224, 168, 0.16)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 5]);
-    ctx.beginPath();
-    for (const rx of ROAD_X) {
-      ctx.moveTo(mapX(rx), mapY(-360));
-      ctx.lineTo(mapX(rx), mapY(215));
-    }
-    for (const rz of ROAD_Z) {
-      ctx.moveTo(mapX(-365), mapY(rz));
-      ctx.lineTo(mapX(375), mapY(rz));
-    }
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Puente del Sol Bridge Span
     ctx.strokeStyle = '#e0453b';
     ctx.lineWidth = 8.5;
     ctx.beginPath();
@@ -438,15 +581,7 @@ export class CareerMenu {
     ctx.moveTo(mapX(38), mapY(200));
     ctx.lineTo(mapX(182), mapY(200));
     ctx.stroke();
-    for (const tx of [76, 144]) {
-      ctx.fillStyle = '#ff5247';
-      ctx.fillRect(mapX(tx) - 3.5, mapY(200) - 7, 7, 14);
-      ctx.strokeStyle = '#ffd46e';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(mapX(tx) - 3.5, mapY(200) - 7, 7, 14);
-    }
 
-    // Crisp District Labels
     ctx.font = '800 9.5px "Avenir Next", system-ui, sans-serif';
     ctx.textAlign = 'center';
     for (const d of DISTRICTS) {
@@ -469,7 +604,6 @@ export class CareerMenu {
       ctx.fillText(label, cx + 3, cy + 1);
     }
 
-    // Glowing GPS Route Line
     const goal = state.customWaypoint ?? missionTarget;
     if (goal) {
       const path = computeGpsPath(playerPos, goal);
@@ -485,70 +619,95 @@ export class CareerMenu {
         else ctx.lineTo(mapX(pt.x), mapY(pt.z));
       });
       ctx.stroke();
-
       ctx.strokeStyle = routeCol;
       ctx.lineWidth = 3.6;
       ctx.stroke();
       ctx.restore();
     }
 
-    // Street Race start markers
+    // Races
     for (const r of STREET_RACES) {
       ctx.fillStyle = '#34e0c8';
       ctx.beginPath();
-      ctx.arc(mapX(r.start.x), mapY(r.start.z), 4.5, 0, Math.PI * 2);
+      ctx.arc(mapX(r.start.x), mapY(r.start.z), 4.2, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = '#091420';
+    }
+
+    // Fishing Piers (cyan markers)
+    for (const f of FISHING_SPOTS) {
+      ctx.fillStyle = '#38bdf8';
+      ctx.beginPath();
+      ctx.arc(mapX(f.x), mapY(f.z), 5.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#071420';
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+    }
+
+    // Garden Beds (lime diamond markers)
+    for (const g of GARDEN_SITES) {
+      const gx = mapX(g.x);
+      const gy = mapY(g.z);
+      ctx.fillStyle = '#a3e635';
+      ctx.beginPath();
+      ctx.moveTo(gx, gy - 5.5);
+      ctx.lineTo(gx + 5.5, gy);
+      ctx.lineTo(gx, gy + 5.5);
+      ctx.lineTo(gx - 5.5, gy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#08140d';
       ctx.lineWidth = 1.4;
       ctx.stroke();
     }
 
-    // 8 City Properties with Distinct House Markers (Green-Filled = Owned, Gold-Outlined = Purchasable)
+    // Barrio Viejo Roof Repair Sites (orange triangle markers)
+    for (const rr of ROOF_REPAIR_SITES) {
+      const rx = mapX(rr.x);
+      const ry = mapY(rr.z);
+      ctx.fillStyle = '#fb923c';
+      ctx.beginPath();
+      ctx.moveTo(rx, ry - 6);
+      ctx.lineTo(rx + 6, ry + 4.5);
+      ctx.lineTo(rx - 6, ry + 4.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#180c06';
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+    }
+
+    // 8 City Properties
     for (const prop of PROPERTIES) {
       const sx = mapX(prop.x);
       const sy = mapY(prop.z);
       const owned = state.ownedProperties?.has(prop.id);
-
       ctx.save();
       ctx.translate(sx, sy);
       ctx.beginPath();
-      ctx.moveTo(0, -7.2);
-      ctx.lineTo(6.8, -1.2);
-      ctx.lineTo(5.6, -1.2);
-      ctx.lineTo(5.6, 5.8);
-      ctx.lineTo(-5.6, 5.8);
-      ctx.lineTo(-5.6, -1.2);
-      ctx.lineTo(-6.8, -1.2);
+      ctx.moveTo(0, -7.0);
+      ctx.lineTo(6.5, -1.2);
+      ctx.lineTo(5.4, -1.2);
+      ctx.lineTo(5.4, 5.5);
+      ctx.lineTo(-5.4, 5.5);
+      ctx.lineTo(-5.4, -1.2);
+      ctx.lineTo(-6.5, -1.2);
       ctx.closePath();
-
-      if (owned) {
-        ctx.fillStyle = '#42e38c';
-        ctx.fill();
-        ctx.strokeStyle = '#07140d';
-        ctx.lineWidth = 1.6;
-        ctx.stroke();
-      } else {
-        ctx.fillStyle = 'rgba(14, 18, 28, 0.92)';
-        ctx.fill();
-        ctx.strokeStyle = '#ffbe55';
-        ctx.lineWidth = 2.0;
-        ctx.stroke();
-      }
+      ctx.fillStyle = owned ? '#42e38c' : 'rgba(14, 18, 28, 0.92)';
+      ctx.fill();
+      ctx.strokeStyle = owned ? '#07140d' : '#ffbe55';
+      ctx.lineWidth = owned ? 1.5 : 2.0;
+      ctx.stroke();
       ctx.restore();
     }
 
-    // Landmark & Property Labels
+    // Landmark Labels
     ctx.font = '800 8.5px "Avenir Next", system-ui, sans-serif';
     ctx.fillStyle = '#ffe0a3';
     ctx.textAlign = 'center';
     for (const lm of LANDMARKS) {
-      if (lm.type === 'bridge') {
-        ctx.fillText(lm.name, mapX(lm.x), mapY(lm.z) - 12);
-      } else if (lm.id === 'mirador-plaza' || lm.id === 'rafas-garage') {
-        ctx.fillText(lm.name, mapX(lm.x), mapY(lm.z) - 11);
-      } else if (lm.id === 'hotel-solsticio') {
-        ctx.fillText(lm.name, mapX(lm.x) - 24, mapY(lm.z) + 18);
-      }
+      if (lm.type === 'bridge') ctx.fillText(lm.name, mapX(lm.x), mapY(lm.z) - 12);
+      else if (lm.id === 'mirador-plaza' || lm.id === 'rafas-garage') ctx.fillText(lm.name, mapX(lm.x), mapY(lm.z) - 11);
     }
 
     // Mission Target Pin
@@ -562,7 +721,7 @@ export class CareerMenu {
       ctx.stroke();
       ctx.fillStyle = '#ffbe55';
       ctx.beginPath();
-      ctx.arc(mx, my, 7.2, 0, Math.PI * 2);
+      ctx.arc(mx, my, 7.0, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = '#12151f';
       ctx.lineWidth = 2;

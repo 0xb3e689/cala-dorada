@@ -2,7 +2,7 @@
 
 import { serializeStateForSave, applySavedData } from '../core/gameState.js';
 
-const STORAGE_KEY = 'cala_dorada_saves_v3';
+const STORAGE_KEY = 'cala_dorada_saves_v4';
 
 const DEFAULT_SLOTS = {
   1: {
@@ -21,6 +21,24 @@ const DEFAULT_SLOTS = {
     ownedProperties: ['dantes-loft', 'rafas-garage', 'el-taller', 'solsticio-club', 'cenit-warehouse'],
     vaultBalance: 14800,
     vehicleUpgrades: { nitroLevel: 2, armorLevel: 2 },
+    carMods: {
+      paint: '#ff6138',
+      finish: 'metallic',
+      spoiler: 'gt',
+      underglow: '#34e0c8',
+      rims: '#e6edf7',
+      turboLevel: 2,
+      armorLevel: 2,
+    },
+    playerAppearance: {
+      outfitStyle: 'bomber',
+      jacketColor: '#e65f3c',
+      pantsColor: '#1b2230',
+      hairStyle: 'swept',
+      hairColor: '#1b1514',
+      skinTone: '#d9a17a',
+      accessory: 'aviators',
+    },
     completedRaces: ['race-1', 'race-2', 'race-3', 'race-4'],
     completedStunts: ['stunt-1', 'stunt-2', 'stunt-3', 'stunt-4', 'stunt-5', 'stunt-6', 'stunt-7'],
     collectedShells: [
@@ -33,6 +51,7 @@ const DEFAULT_SLOTS = {
     },
     careerStats: {
       cashEarned: 284600, pursuitsEvaded: 19, topSpeedMph: 164, stuntsLanded: 14, takedowns: 87, playtimeSec: 11420, distanceKm: 68.4,
+      carModsInstalled: 6, fishCaught: 11, cropsHarvested: 8, roofsRepaired: 4,
     },
   },
   2: {
@@ -51,6 +70,24 @@ const DEFAULT_SLOTS = {
     ownedProperties: ['dantes-loft', 'rafas-garage', 'el-taller'],
     vaultBalance: 4200,
     vehicleUpgrades: { nitroLevel: 1, armorLevel: 1 },
+    carMods: {
+      paint: '#2ec4b6',
+      finish: 'metallic',
+      spoiler: 'ducktail',
+      underglow: 'off',
+      rims: '#e6edf7',
+      turboLevel: 1,
+      armorLevel: 1,
+    },
+    playerAppearance: {
+      outfitStyle: 'blazer',
+      jacketColor: '#1e2430',
+      pantsColor: '#24272e',
+      hairStyle: 'swept',
+      hairColor: '#1b1514',
+      skinTone: '#d9a17a',
+      accessory: 'aviators',
+    },
     completedRaces: ['race-1'],
     completedStunts: ['stunt-1', 'stunt-2'],
     collectedShells: ['sh1', 'sh2', 'sh3', 'sh7', 'sh8'],
@@ -60,6 +97,7 @@ const DEFAULT_SLOTS = {
     },
     careerStats: {
       cashEarned: 74900, pursuitsEvaded: 7, topSpeedMph: 146, stuntsLanded: 5, takedowns: 31, playtimeSec: 4620, distanceKm: 24.8,
+      carModsInstalled: 2, fishCaught: 3, cropsHarvested: 2, roofsRepaired: 1,
     },
   },
   3: null,

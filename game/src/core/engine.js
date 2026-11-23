@@ -1,15 +1,15 @@
 // Core 3D game engine: Three.js renderer, scene, dynamic camera rig, main loop, and full subsystem integration.
 
 import * as THREE from '../../vendor/three.module.min.js';
-import { RADIO_STATIONS } from './config.js';
+import { RADIO_STATIONS, GARDEN_CROPS } from './config.js';
 import { createInitialState } from './gameState.js';
 import { InputController } from './input.js';
 import { createTextureLibrary } from '../world/textures.js';
-import { getDistrictAt } from '../world/cityPlan.js';
+import { getDistrictAt, FISHING_SPOTS, ROOF_REPAIR_SITES } from '../world/cityPlan.js';
 import { buildCalaDoradaCity } from '../world/cityBuilder.js';
 import { SkyAndLighting } from '../world/skyAndLighting.js';
 import { TrafficAndPeds } from '../world/trafficAndPeds.js';
-import { createVehicleMesh } from '../entities/vehicleFactory.js';
+import { createVehicleMesh, applyVehicleMods } from '../entities/vehicleFactory.js';
 import { VehiclePhysics } from '../entities/vehiclePhysics.js';
 import { PlayerController } from '../entities/playerController.js';
 import { PoliceDispatch } from '../entities/policeDispatch.js';
@@ -74,19 +74,52 @@ export class CalaDoradaEngine {
     this.activities = new ActivitiesAndShops(this.scene);
 
     // UI Overlays
-    this.hud = new HudOverlay();
+    this.hud = new HudOverlay({
+      onSelectWeapon: (idx) => {
+        this.state.activeWeaponIdx = idx;
+        this.state.weaponWheelHoverIdx = idx;
+        this.state.weaponWheelOpen = false;
+        this.audio.playUiBeep(640 + idx * 40);
+      },
+      onActivityStrike: () => this._handleActivityStrike(),
+    });
     this.shopEl = document.getElementById('shop-overlay');
     this.career = new CareerMenu({
       onResume: () => this.setMode('playing'),
       onTimeChanged: () => this.sky.applyTimeOfDay(this.state.timeOfDay, this.getFocusPos()),
+      onSlotLoaded: () => this.syncCustomizationVisuals(),
+      onCarMod: (cat, val, cost) => this.activities.applyCarMod(cat, val, cost, this.state, this.playerVehicle, this.saveManager, this.audio),
+      onAppearanceMod: (field, val) => this.activities.applyAppearanceMod(field, val, this.state, this.player, this.saveManager, this.audio),
+      onGardenAction: (act, plotId, cropId) => {
+        if (act === 'plant') this.activities.plantPlot(plotId, cropId, this.state, this.saveManager, this.audio);
+        else if (act === 'water') this.activities.waterPlot(plotId, this.state, this.saveManager, this.audio);
+        else if (act === 'harvest') this.activities.harvestPlot(plotId, this.state, this.saveManager, this.audio);
+        this.activities.syncGardenMeshes(this.state, this.worldAnim);
+      },
+      onStartFishing: (spotId) => {
+        const spot = FISHING_SPOTS.find((f) => f.id === spotId);
+        if (spot) {
+          this.setMode('playing');
+          this.activities.startFishing(spot, this.state, this.player);
+        }
+      },
+      onStartRoof: (siteId) => {
+        const site = ROOF_REPAIR_SITES.find((r) => r.id === siteId);
+        if (site) {
+          this.setMode('playing');
+          this.activities.startRoofRepair(site, this.state, this.player);
+        }
+      },
     });
     this.title = new TitleScreen({
       onContinue: () => {
         this.saveManager.loadSlot(1, this.state);
+        this.syncCustomizationVisuals();
         this.startPlay();
       },
       onNewGame: () => {
         this.state = createInitialState();
+        this.syncCustomizationVisuals();
         this.missions.startMission(this.state, 'm1', this.combat, this.police);
         this.startPlay();
       },
@@ -95,10 +128,12 @@ export class CalaDoradaEngine {
           this.state = createInitialState();
           this.state.activeSlot = slot;
         }
+        this.syncCustomizationVisuals();
         this.startPlay();
       },
       onOpenCareer: () => {
         this.saveManager.loadSlot(1, this.state);
+        this.syncCustomizationVisuals();
         this.setMode('paused');
       },
     });
@@ -108,9 +143,28 @@ export class CalaDoradaEngine {
     this.camPos = new THREE.Vector3(-160, 12, 215);
     this.camLook = new THREE.Vector3(-120, 2, 200);
     this.shotFrozen = false;
+    this.wheelShotRight = false;
 
     this._bindEvents();
     this.setMode('title');
+  }
+
+  syncCustomizationVisuals() {
+    applyVehicleMods(this.playerVehicle, this.state.carMods);
+    this.player.applyAppearance(this.state.playerAppearance);
+    this.activities.lastGardenSyncKey = '';
+    this.activities.lastRoofSyncKey = '';
+    this.activities.syncGardenMeshes(this.state, this.worldAnim);
+    this.activities.syncRoofMeshes(this.state, this.worldAnim);
+  }
+
+  _handleActivityStrike() {
+    if (this.activities.fishingSession) {
+      this.activities.triggerFishingReel(this.state, this.player, this.saveManager, this.audio);
+    } else if (this.activities.roofSession) {
+      this.activities.triggerRoofHammer(this.state, this.saveManager, this.audio);
+      this.activities.syncRoofMeshes(this.state, this.worldAnim);
+    }
   }
 
   _bindEvents() {
@@ -133,6 +187,18 @@ export class CalaDoradaEngine {
       }
 
       if (code === 'Escape' || code === 'KeyM') {
+        if (this.state.weaponWheelOpen) {
+          this.state.weaponWheelOpen = false;
+          return;
+        }
+        if (this.activities.fishingSession) {
+          this.activities.stopFishing(this.player);
+          return;
+        }
+        if (this.activities.roofSession) {
+          this.activities.stopRoofRepair();
+          return;
+        }
         if (this.state.mode === 'shop') {
           this.shopEl.classList.add('hidden');
           this.setMode('playing');
@@ -144,10 +210,28 @@ export class CalaDoradaEngine {
 
       if (this.state.mode !== 'playing') return;
 
+      // CS:GO Radial Weapon Select Wheel [Q] or [Tab]
+      if (code === 'KeyQ' || code === 'Tab') {
+        this.state.weaponWheelOpen = !this.state.weaponWheelOpen;
+        this.state.weaponWheelHoverIdx = this.state.activeWeaponIdx;
+        this.audio.playUiBeep(this.state.weaponWheelOpen ? 680 : 480);
+        return;
+      }
+
+      // Fishing / Roof Repair mini-game strike on [Space]
+      if (code === 'Space' && (this.activities.fishingSession || this.activities.roofSession)) {
+        this._handleActivityStrike();
+        return;
+      }
+
       // Weapon slots 1-6
       if (code.startsWith('Digit')) {
         const n = Number(code.slice(5)) - 1;
-        if (n >= 0 && n <= 5) this.state.activeWeaponIdx = n;
+        if (n >= 0 && n <= 5) {
+          this.state.activeWeaponIdx = n;
+          this.state.weaponWheelHoverIdx = n;
+          this.state.weaponWheelOpen = false;
+        }
       }
 
       // Enter / Exit Vehicle
@@ -162,7 +246,7 @@ export class CalaDoradaEngine {
       if (code === 'KeyR') {
         this.state.radioStationIdx = (this.state.radioStationIdx + 1) % RADIO_STATIONS.length;
         const st = RADIO_STATIONS[this.state.radioStationIdx];
-        this.state.toast = { text: `RADIO TUNED: ${st.freq} ${st.name.toUpperCase()}`, timer: 2.2 };
+        this.state.toast = { text: `${st.freq} ${st.name.toUpperCase()}`, timer: 2.2 };
         this.audio.playUiBeep(540);
       }
 
@@ -173,12 +257,20 @@ export class CalaDoradaEngine {
         this.state.settings.cameraMode = modes[(cur + 1) % modes.length];
       }
 
-      // Interact with shop or race
+      // Interact with property, fishing pier, garden, roof repair, or street race
       if (code === 'KeyE') {
-        this.activities.interact(this.state, this.playerVehicle, this.saveManager, (sh) => this.openShop(sh), this.audio);
+        this.activities.interact(
+          this.state,
+          this.playerVehicle,
+          this.player,
+          this.saveManager,
+          (sh) => this.openShop(sh),
+          (site) => this.openGardenModal(site),
+          this.audio
+        );
       }
 
-      // Quick Wanted Test Escalation [H] for easy pursuit thrill
+      // Quick Wanted Escalation [H]
       if (code === 'KeyH') {
         this.police.addHeat(this.state, 105);
       }
@@ -221,13 +313,9 @@ export class CalaDoradaEngine {
         <button class="menu-btn primary" data-act="buy-property"><span>BUY ${prop.shortName}</span><span>$${prop.price.toLocaleString()}</span></button>`;
     } else if (prop.kind === 'garage') {
       buttonsHtml = `
-        <button class="menu-btn primary" data-act="repair"><span>FULL REPAIR & NITRO</span><span>$600</span></button>
-        <button class="menu-btn" data-act="clear-wanted"><span>SCRUB PLATES (CLEAR WANTED)</span><span>$2,500</span></button>
-        <button class="menu-btn" data-act="upgrade-nitro"><span>NITRO TANK LV.${(this.state.vehicleUpgrades?.nitroLevel ?? 1) + 1}</span><span>$4,500</span></button>
-        <button class="menu-btn" data-act="upgrade-armor"><span>ARMOR CHASSIS LV.${(this.state.vehicleUpgrades?.armorLevel ?? 1) + 1}</span><span>$6,000</span></button>
-        <button class="menu-btn" data-act="paint:#ff6138"><span>SOLSTICIO CORAL PAINT</span><span>$1,200</span></button>
-        <button class="menu-btn" data-act="paint:#34e0c8"><span>ESMERALDA TEAL PAINT</span><span>$1,200</span></button>
-        <button class="menu-btn" data-act="paint:#ffbe55"><span>GOLD COAST METALLIC</span><span>$1,200</span></button>`;
+        <button class="menu-btn primary" data-act="open-garage-mod"><span>CUSTOMIZE VEHICLE (PAINT, SPOILER, NEON, RIMS)</span></button>
+        <button class="menu-btn" data-act="repair"><span>FULL REPAIR & NITRO</span><span>$600</span></button>
+        <button class="menu-btn" data-act="clear-wanted"><span>SCRUB PLATES (CLEAR WANTED)</span><span>$2,500</span></button>`;
     } else if (prop.kind === 'gunsmith') {
       buttonsHtml = `
         <button class="menu-btn primary" data-act="ammo"><span>RESTOCK ALL WEAPON AMMO</span><span>$900</span></button>
@@ -235,8 +323,9 @@ export class CalaDoradaEngine {
         <button class="menu-btn" data-act="tactical-pack"><span>FULL TACTICAL LOADOUT PACK</span><span>$2,200</span></button>`;
     } else if (prop.kind === 'safehouse') {
       buttonsHtml = `
-        <button class="menu-btn primary" data-act="safehouse-rest"><span>REST, FULL HEAL & SAVE GAME</span><span>FREE</span></button>
-        <button class="menu-btn" data-act="advance-time"><span>ADVANCE TIME OF DAY (+5.5H)</span><span>FREE</span></button>`;
+        <button class="menu-btn primary" data-act="open-wardrobe-mod"><span>WARDROBE & APPEARANCE</span></button>
+        <button class="menu-btn" data-act="safehouse-rest"><span>REST, FULL HEAL & SAVE</span><span>FREE</span></button>
+        <button class="menu-btn" data-act="advance-time"><span>ADVANCE TIME (+5.5H)</span><span>FREE</span></button>`;
     } else if (prop.kind === 'vault') {
       buttonsHtml = `
         <button class="menu-btn primary" data-act="collect-vault"><span>COLLECT EMPIRE VAULT INCOME</span><span>+$${vaultAmt.toLocaleString()}</span></button>
@@ -265,6 +354,18 @@ export class CalaDoradaEngine {
 
     this.shopEl.querySelectorAll('[data-act]').forEach((b) => {
       b.addEventListener('click', () => {
+        if (b.dataset.act === 'open-garage-mod') {
+          this.shopEl.classList.add('hidden');
+          this.career.activeTab = 'GARAGE';
+          this.setMode('paused');
+          return;
+        }
+        if (b.dataset.act === 'open-wardrobe-mod') {
+          this.shopEl.classList.add('hidden');
+          this.career.activeTab = 'WARDROBE';
+          this.setMode('paused');
+          return;
+        }
         this.activities.applyPropertyAction(
           prop,
           b.dataset.act,
@@ -279,6 +380,47 @@ export class CalaDoradaEngine {
       });
     });
     this.shopEl.querySelector('#shop-close').addEventListener('click', () => {
+      this.shopEl.classList.add('hidden');
+      this.setMode('playing');
+    });
+  }
+
+  openGardenModal(site) {
+    this.setMode('shop');
+    this.shopEl.classList.remove('hidden');
+    const plots = (this.state.gardenPlots ?? []).filter((p) => p.siteId === site.id);
+    const rows = plots.map((p, i) => {
+      const crop = GARDEN_CROPS.find((c) => c.id === p.cropId);
+      const label = crop ? `${crop.name} (Stage ${p.stage}/3)` : 'Empty Planter';
+      let ctrls = '';
+      if (!crop) {
+        ctrls = GARDEN_CROPS.map((c) => `<button class="btn-xs alt" data-gp="plant" data-pid="${p.id}" data-cid="${c.id}">${c.name.split(' ')[0]} $${c.seedCost}</button>`).join('');
+      } else if (p.stage < 3) {
+        ctrls = `<button class="btn-xs alt" data-gp="water" data-pid="${p.id}">WATER</button>`;
+      } else {
+        ctrls = `<button class="btn-xs" data-gp="harvest" data-pid="${p.id}">HARVEST +$${crop.sellValue}</button>`;
+      }
+      return `<div class="plot-row"><span>Bed ${i + 1}: ${label}</span><div style="display:flex;gap:4px;flex-wrap:wrap">${ctrls}</div></div>`;
+    }).join('');
+
+    this.shopEl.innerHTML = `
+      <div class="glass-card panel-box" style="max-width:560px;margin:auto">
+        <div class="panel-hdr"><span>${site.name.toUpperCase()}</span><span style="color:#42e38c">$${Math.round(this.state.cash).toLocaleString()}</span></div>
+        ${rows}
+        <button class="resume-btn" id="garden-close">CLOSE [ESC]</button>
+      </div>`;
+
+    this.shopEl.querySelectorAll('[data-gp]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const act = btn.dataset.gp;
+        if (act === 'plant') this.activities.plantPlot(btn.dataset.pid, btn.dataset.cid, this.state, this.saveManager, this.audio);
+        else if (act === 'water') this.activities.waterPlot(btn.dataset.pid, this.state, this.saveManager, this.audio);
+        else if (act === 'harvest') this.activities.harvestPlot(btn.dataset.pid, this.state, this.saveManager, this.audio);
+        this.activities.syncGardenMeshes(this.state, this.worldAnim);
+        this.openGardenModal(site);
+      });
+    });
+    this.shopEl.querySelector('#garden-close').addEventListener('click', () => {
       this.shopEl.classList.add('hidden');
       this.setMode('playing');
     });
@@ -357,13 +499,36 @@ export class CalaDoradaEngine {
         this.state.careerStats.distanceKm += (this.playerVehicle.speed * dt) / 1000;
       } else {
         this.player.updateOnFoot(this.input, dt, this.elapsed, this.player.yaw);
-        if (this.input.mouseDown) {
-          const aimDir = new THREE.Vector3(Math.sin(this.player.yaw), -0.02, Math.cos(this.player.yaw)).normalize();
+        if (this.input.mouseDown && !this.state.weaponWheelOpen && !this.activities.fishingSession && !this.activities.roofSession) {
+          // Aim directly along camera center ray (50%, 50% crosshair)
+          const camDir = new THREE.Vector3();
+          this.camera.getWorldDirection(camDir);
+          const aimTarget = this.camera.position.clone().addScaledVector(camDir, 45);
+          const muzzle = this.player.getMuzzleWorldPos();
+          const aimDir = aimTarget.sub(muzzle).normalize();
           this.combat.tryPlayerFire(this.state, this.player, aimDir, this.audio, null, () => {
             this.police.addHeat(this.state, 28);
             this.traffic.triggerPanicNear(this.player.pos, 50);
           });
         }
+      }
+
+      if (this.state.mode === 'playing' && this.state.weaponWheelOpen && !this.shotFrozen) {
+        // Mouse direction sector selection for CS:GO radial wheel
+        const dx = this.input.mouseX - window.innerWidth / 2;
+        const dy = this.input.mouseY - window.innerHeight / 2;
+        if (Math.hypot(dx, dy) > 28) {
+          let deg = (Math.atan2(dy, dx) * 180) / Math.PI;
+          let shifted = ((deg + 120) % 360 + 360) % 360;
+          const idx = Math.floor(shifted / 60) % 6;
+          this.state.weaponWheelHoverIdx = idx;
+          this.state.activeWeaponIdx = idx;
+        }
+      }
+
+      if (this.input.wheelDelta !== 0) {
+        this.state.activeWeaponIdx = (this.state.activeWeaponIdx + Math.sign(this.input.wheelDelta) + 6) % 6;
+        this.state.weaponWheelHoverIdx = this.state.activeWeaponIdx;
       }
 
       this.vehiclePhysics.updateParticles(dt);
@@ -425,6 +590,8 @@ export class CalaDoradaEngine {
       heliPos: this.heli.mesh.position,
       enemies: this.combat.enemies,
       promptText: this.activities.getPromptText(this.state),
+      activities: this.activities,
+      wheelShotRight: this.wheelShotRight,
       elapsed: this.elapsed,
       forceDom,
     });

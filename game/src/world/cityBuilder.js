@@ -2,7 +2,7 @@
 
 import * as THREE from '../../vendor/three.module.min.js';
 import { WORLD, PROPERTIES } from '../core/config.js';
-import { ROAD_X, ROAD_Z, STUNT_RAMPS, GOLDEN_SHELLS } from './cityPlan.js';
+import { ROAD_X, ROAD_Z, STUNT_RAMPS, GOLDEN_SHELLS, FISHING_SPOTS, GARDEN_SITES, ROOF_REPAIR_SITES } from './cityPlan.js';
 import { createSignTexture } from './textures.js';
 import { getRadialGlowTexture } from '../entities/vehicleFactory.js';
 
@@ -19,7 +19,7 @@ export function buildCalaDoradaCity(scene, textures) {
   const root = new THREE.Group();
   root.name = 'CalaDoradaWorld';
   const colliders = []; // { minX, maxX, minZ, maxZ, height }
-  const animated = { ocean: null, palms: [], shells: [], lanterns: [], propertyBeacons: [] };
+  const animated = { ocean: null, palms: [], shells: [], lanterns: [], propertyBeacons: [], gardenBeds: {}, roofSites: {} };
 
   // 1. Base City Terrain & Terraced Plaza Slab
   const groundMat = new THREE.MeshStandardMaterial({ map: textures.sidewalk, roughness: 0.88, metalness: 0.04 });
@@ -614,8 +614,135 @@ export function buildCalaDoradaCity(scene, textures) {
     animated.shells.push(mesh);
   }
 
+  // 13. Interactive World Activity Sites (Fishing Piers, Raised Garden Beds & Barrio Viejo Terracotta Roof Repair)
+  buildActivityWorldSites(root, animated);
+
   scene.add(root);
   return { root, colliders, animated };
+}
+
+function buildActivityWorldSites(root, animated) {
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0x8a5e3b, roughness: 0.86 });
+  const soilMat = new THREE.MeshStandardMaterial({ color: 0x3b281c, roughness: 0.95 });
+  const terraMat = new THREE.MeshStandardMaterial({ color: 0xc25434, roughness: 0.72 });
+  const damagedMat = new THREE.MeshStandardMaterial({
+    color: 0xffb347, emissive: 0xff8c1a, emissiveIntensity: 0.65, transparent: true, opacity: 0.78, roughness: 0.45,
+  });
+
+  // A. Fishing Pier Props & Paseo Dorado Wooden Fishing Pier
+  for (const spot of FISHING_SPOTS) {
+    if (spot.id === 'fish-paseo') {
+      const pier = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.5, 42), woodMat);
+      pier.position.set(spot.x, 0.48, spot.z + 4);
+      root.add(pier);
+      for (let pz = spot.z - 14; pz <= spot.z + 22; pz += 9) {
+        for (const px of [-2.2, 2.2]) {
+          const piling = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 2.2, 8), woodMat);
+          piling.position.set(spot.x + px, -0.3, pz);
+          root.add(piling);
+        }
+      }
+    }
+    const crate = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.75, 0.8), woodMat);
+    crate.position.set(spot.x + 1.8, 0.95, spot.z - 1.2);
+    const bucket = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.22, 0.5, 10), new THREE.MeshStandardMaterial({ color: 0x34e0c8, roughness: 0.4 }));
+    bucket.position.set(spot.x - 1.6, 0.82, spot.z - 0.8);
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(2.2, 2.75, 28),
+      new THREE.MeshBasicMaterial({ color: 0x34e0c8, side: THREE.DoubleSide, transparent: true, opacity: 0.78 })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(spot.x, 0.82, spot.z);
+    root.add(crate, bucket, ring);
+  }
+
+  // B. 3D Raised Garden Beds with Dynamic Growth Stage Meshes (4 plots per site)
+  for (const site of GARDEN_SITES) {
+    const sitePlots = [];
+    for (let i = 0; i < 4; i++) {
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      const bx = site.x - 2.6 + col * 5.2;
+      const bz = site.z - 2.0 + row * 4.0;
+      const bedGroup = new THREE.Group();
+      bedGroup.position.set(bx, 0, bz);
+
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(4.1, 0.65, 2.8), woodMat);
+      frame.position.y = 0.325;
+      frame.castShadow = true;
+      const soil = new THREE.Mesh(new THREE.BoxGeometry(3.75, 0.14, 2.45), soilMat);
+      soil.position.y = 0.63;
+      bedGroup.add(frame, soil);
+
+      const plantRoot = new THREE.Group();
+      plantRoot.position.y = 0.7;
+      bedGroup.add(plantRoot);
+      root.add(bedGroup);
+      sitePlots.push(plantRoot);
+    }
+    const gRing = new THREE.Mesh(
+      new THREE.RingGeometry(2.6, 3.2, 28),
+      new THREE.MeshBasicMaterial({ color: 0x42e38c, side: THREE.DoubleSide, transparent: true, opacity: 0.76 })
+    );
+    gRing.rotation.x = -Math.PI / 2;
+    gRing.position.set(site.x, 0.15, site.z + 4.4);
+    root.add(gRing);
+    animated.gardenBeds[site.id] = sitePlots;
+  }
+
+  // C. Barrio Viejo Interactive Terracotta Roof Repair Sites (low veranda roof + ladder + 6 swappable tiles!)
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0xe6cdb2, roughness: 0.78 });
+  for (const site of ROOF_REPAIR_SITES) {
+    const rg = new THREE.Group();
+    rg.position.set(site.x, 0, site.z);
+
+    // Low terracotta veranda structure with slanted tiled roof
+    const shed = new THREE.Mesh(new THREE.BoxGeometry(8.2, 3.4, 5.6), wallMat);
+    shed.position.set(0, 1.7, -3.5);
+    shed.castShadow = true;
+    const roofBase = new THREE.Mesh(new THREE.BoxGeometry(9.0, 0.28, 6.4), terraMat);
+    roofBase.position.set(0, 3.65, -3.5);
+    roofBase.rotation.x = 0.24;
+    rg.add(shed, roofBase);
+
+    // Wooden access ladder leaning against roof eaves
+    for (const lx of [-0.45, 0.45]) {
+      const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 3.8, 6), woodMat);
+      rail.position.set(lx, 1.75, -0.35);
+      rail.rotation.x = -0.26;
+      rg.add(rail);
+    }
+    for (let r = 0; r < 6; r++) {
+      const rung = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.9, 6), woodMat);
+      rung.rotation.z = Math.PI / 2;
+      rung.position.set(0, 0.45 + r * 0.52, -0.05 - r * 0.13);
+      rg.add(rung);
+    }
+
+    // 6 Individual Terracotta Tile Slots (damaged = glowing amber gap, repaired = solid terracotta tile!)
+    const tileSlots = [];
+    for (let t = 0; t < site.totalTiles; t++) {
+      const tx = -3.1 + (t % 3) * 3.1;
+      const tz = -4.6 + Math.floor(t / 3) * 2.1;
+      const ty = 3.92 - Math.floor(t / 3) * 0.5;
+      const tileMesh = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.24, 1.65), damagedMat.clone());
+      tileMesh.position.set(tx, ty, tz);
+      tileMesh.rotation.x = 0.24;
+      rg.add(tileMesh);
+      tileSlots.push({ mesh: tileMesh, repairedMat: terraMat, damagedMat: tileMesh.material });
+    }
+
+    const rRing = new THREE.Mesh(
+      new THREE.RingGeometry(2.4, 3.0, 28),
+      new THREE.MeshBasicMaterial({ color: 0xffbe55, side: THREE.DoubleSide, transparent: true, opacity: 0.8 })
+    );
+    rRing.rotation.x = -Math.PI / 2;
+    rRing.position.set(0, 0.15, 1.2);
+    rg.add(rRing);
+
+    root.add(rg);
+    animated.roofSites[site.id] = tileSlots;
+  }
 }
 
 function buildBoardwalkFences(root) {
