@@ -212,13 +212,13 @@ export class HudOverlay {
       return;
     }
 
-    const showHit = !state.inVehicle && hitConfirmTimer > 0;
+    const showHit = hitConfirmTimer > 0;
     this.reticle.classList.toggle('hit-confirm', showHit);
     this.reticle.classList.toggle('hit-crit', showHit && Boolean(hitConfirmCrit));
 
     // Subtle reload progress ring around crosshair
     if (this.reloadSvg && this.reloadArc) {
-      const reloading = !state.inVehicle && state.reloadTimer > 0 && state.reloadDuration > 0;
+      const reloading = state.reloadTimer > 0 && state.reloadDuration > 0;
       this.reloadSvg.classList.toggle('hidden', !reloading);
       if (reloading) {
         const prog = 1 - state.reloadTimer / state.reloadDuration;
@@ -232,7 +232,7 @@ export class HudOverlay {
     let html = '';
 
     for (const e of enemies ?? []) {
-      if (e.downed || !e.attacking) continue;
+      if (e.dead || e.downed || !e.attacking) continue;
       _projVec.set(e.pos.x, e.pos.y + 2.08, e.pos.z);
       _projVec.project(camera);
       if (_projVec.z >= 1 || _projVec.z < -1) continue;
@@ -303,16 +303,19 @@ export class HudOverlay {
       this.underwaterTintEl.classList.toggle('hidden', !state.diving || Boolean(state.statusOverlay));
     }
 
+    const activeWeaponForReticle = WEAPONS[state.activeWeaponIdx] ?? WEAPONS[0];
+    const canDriveBy = state.inVehicle && (activeWeaponForReticle.id === 'pistol' || activeWeaponForReticle.id === 'smg') && !ctx.shotFrozen;
     this.reticle.classList.toggle(
       'hidden',
-      state.inVehicle || Boolean(state.statusOverlay) || Boolean(activities?.fishingSession) || Boolean(activities?.roofSession)
+      (state.inVehicle && !canDriveBy) || Boolean(state.statusOverlay) || Boolean(activities?.fishingSession) || Boolean(activities?.roofSession)
     );
     this.renderWeaponWheel(state, Boolean(wheelShotRight));
 
-    // Minimap renders every frame
+    // Minimap renders every frame (prioritize active Taxi/Vigilante side-job target when running a side-job!)
+    const sideJob = activities?.getActiveSideJobInfo ? activities.getActiveSideJobInfo() : null;
     this.minimap.render({
       state, playerPos, playerYaw, policeUnits, footOfficers, heliPos, enemies,
-      missionTarget: stage?.target ?? null, elapsed,
+      missionTarget: sideJob?.target ?? stage?.target ?? null, elapsed,
     });
 
     // Live Fishing / Roof Repair Mini-Game Bar
@@ -378,8 +381,18 @@ export class HudOverlay {
     if (elapsed - this.lastRenderTime < 0.06 && !ctx.forceDom) return;
     this.lastRenderTime = elapsed;
 
-    // 1. Concise Mission Card ONLY during an active mission (Title + 1-line objective + timer — ZERO NEXT:, ZERO clutter!)
-    if (mission && stage) {
+    // 1. Concise Mission / Side-Job Card ONLY when active (Title + 1-line objective + timer — ZERO clutter!)
+    if (sideJob) {
+      this.missionEl.classList.remove('hidden');
+      const mins = Math.floor(Math.max(0, sideJob.timer) / 60);
+      const secs = String(Math.floor(Math.max(0, sideJob.timer) % 60)).padStart(2, '0');
+      this.missionEl.innerHTML = `
+        <div class="mission-head">
+          <div class="mission-title">${sideJob.title}</div>
+          <span class="mission-timer">${mins}:${secs}</span>
+        </div>
+        <div class="mission-obj">${sideJob.label}</div>`;
+    } else if (mission && stage) {
       this.missionEl.classList.remove('hidden');
       const mins = Math.floor(state.missionTimer / 60);
       const secs = String(Math.floor(state.missionTimer % 60)).padStart(2, '0');

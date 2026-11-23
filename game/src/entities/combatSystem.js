@@ -153,22 +153,25 @@ export class CombatSystem {
       enemy.downed = true;
       enemy.attacking = false;
       enemy.deathTimer = 0.001;
+      enemy.deathBaseY = enemy.pos.y ?? 0;
       enemy.knockdownTimer = 0;
       if (enemy.mesh.userData.muzzleFlash) enemy.mesh.userData.muzzleFlash.visible = false;
       if (!enemy.bloodMark) {
         const mark = new THREE.Mesh(this._bloodGeo, this._bloodMat);
         mark.rotation.x = -Math.PI / 2;
-        mark.position.set(enemy.pos.x, enemy.pos.y + 0.04, enemy.pos.z);
+        mark.position.set(enemy.pos.x, enemy.deathBaseY + 0.04, enemy.pos.z);
         this.group.add(mark);
         enemy.bloodMark = mark;
       }
-      poseHumanCollapse(enemy.mesh, 0.12, enemy.fallSide ?? 1);
+      poseHumanCollapse(enemy.mesh, 0.12, enemy.fallSide ?? 1, enemy.deathBaseY);
       if (state) {
         state.careerStats.takedowns += 1;
         state.cash += enemy.isPolice ? 0 : 350;
         state.rp += enemy.isPolice ? 25 : 45;
       }
-      this.spawnPickup(enemy.pos.clone(), enemy.isPolice ? 'armor' : (Math.random() < 0.5 ? 'health' : 'armor'));
+      const r = Math.random();
+      const dropKind = enemy.isPolice ? (r < 0.5 ? 'armor' : 'ammo') : (r < 0.35 ? 'health' : r < 0.65 ? 'cash' : r < 0.85 ? 'ammo' : 'armor');
+      this.spawnPickup(enemy.pos.clone(), dropKind);
       if (opts.onEnemyDown) opts.onEnemyDown(enemy);
       return { killed: true };
     }
@@ -225,15 +228,90 @@ export class CombatSystem {
     this.sparks.push({ mesh: sp, vel: new THREE.Vector3(0, 0.4, 0), life: 0.22 });
   }
 
-  spawnPickup(pos, kind = 'health') {
-    const col = kind === 'health' ? 0x42e38c : 0x4ba3ff;
-    const mesh = new THREE.Mesh(
-      new THREE.OctahedronGeometry(0.48, 0),
-      new THREE.MeshBasicMaterial({ color: col })
-    );
-    mesh.position.set(pos.x, pos.y + 0.9, pos.z);
-    this.group.add(mesh);
-    this.pickups.push({ mesh, kind, pos: mesh.position });
+  spawnPickup(pos, kind = 'health', opts = {}) {
+    const g = new THREE.Group();
+    const glowCols = {
+      health: ['#ffffff', 'rgba(66,227,140,0.75)'],
+      armor: ['#ffffff', 'rgba(75,163,255,0.75)'],
+      ammo: ['#ffffff', 'rgba(255,190,85,0.75)'],
+      cash: ['#ffffff', 'rgba(52,224,132,0.75)'],
+    };
+    const [gIn, gMid] = glowCols[kind] ?? glowCols.health;
+
+    if (kind === 'health') {
+      // Crisp white medkit box with glowing emerald cross
+      const box = new THREE.Mesh(
+        new THREE.BoxGeometry(0.68, 0.48, 0.34),
+        new THREE.MeshStandardMaterial({ color: 0xf4f8fc, emissive: 0x164a32, emissiveIntensity: 0.45, roughness: 0.3 })
+      );
+      const crossMat = new THREE.MeshBasicMaterial({ color: 0x22e584 });
+      const cv = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.34, 0.38), crossMat);
+      const ch = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.14, 0.38), crossMat);
+      g.add(box, cv, ch);
+    } else if (kind === 'armor') {
+      // Glowing blue tactical armor vest / shield icon
+      const vest = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.46, 0),
+        new THREE.MeshStandardMaterial({ color: 0x3b82f6, emissive: 0x2563eb, emissiveIntensity: 0.65, metalness: 0.5, roughness: 0.25 })
+      );
+      vest.scale.set(1.0, 1.25, 0.55);
+      g.add(vest);
+    } else if (kind === 'ammo') {
+      // Golden tactical ammo crate
+      const crate = new THREE.Mesh(
+        new THREE.BoxGeometry(0.66, 0.42, 0.44),
+        new THREE.MeshStandardMaterial({ color: 0xd99b26, emissive: 0x8a5808, emissiveIntensity: 0.55, metalness: 0.45, roughness: 0.35 })
+      );
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.69, 0.10, 0.46), new THREE.MeshBasicMaterial({ color: 0xffe478 }));
+      g.add(crate, stripe);
+    } else {
+      // Emerald green cash stack
+      const stack = new THREE.Mesh(
+        new THREE.BoxGeometry(0.62, 0.24, 0.38),
+        new THREE.MeshStandardMaterial({ color: 0x22c55e, emissive: 0x15803d, emissiveIntensity: 0.6, roughness: 0.4 })
+      );
+      const band = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.26, 0.40), new THREE.MeshBasicMaterial({ color: 0xffd24d }));
+      g.add(stack, band);
+    }
+
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: getRadialGlowTexture(gIn, gMid, 'rgba(0,0,0,0)'),
+      transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    halo.scale.set(1.65, 1.65, 1);
+    g.add(halo);
+
+    const baseY = (pos.y ?? 0) + 0.95;
+    g.position.set(pos.x, baseY, pos.z);
+    this.group.add(g);
+    const pk = {
+      id: opts.id ?? null,
+      mesh: g,
+      kind,
+      amount: opts.amount ?? null,
+      pos: g.position,
+      baseY,
+      respawnSec: opts.respawnSec ?? 0,
+      respawnTimer: 0,
+      collected: false,
+    };
+    this.pickups.push(pk);
+    return pk;
+  }
+
+  _testExplosiveRay(origin, dir, maxDist, exp) {
+    const baseY = exp.pos.y ?? 0;
+    const cx = exp.pos.x - origin.x;
+    const cz = exp.pos.z - origin.z;
+    const horizLenSq = dir.x * dir.x + dir.z * dir.z;
+    let t = horizLenSq > 1e-6 ? (cx * dir.x + cz * dir.z) / horizLenSq : (baseY + exp.height * 0.5 - origin.y) / (dir.y || 1);
+    if (t <= 0 || t >= maxDist) return null;
+    const hx = origin.x + dir.x * t;
+    const hy = origin.y + dir.y * t;
+    const hz = origin.z + dir.z * t;
+    if (hy < baseY - 0.1 || hy > baseY + exp.height + 0.2) return null;
+    if (Math.hypot(hx - exp.pos.x, hz - exp.pos.z) > exp.radius + 0.25) return null;
+    return { dist: t, point: new THREE.Vector3(hx, hy, hz) };
   }
 
   // Exact ray vs vertical human capsule (y in [baseY+0.05, baseY+1.88], radius 0.62m)
@@ -261,9 +339,14 @@ export class CombatSystem {
   tryPlayerFire(state, player, aimDir, audio, onEnemyDown, onCrime, extraTargets = {}) {
     if (this.fireCooldown > 0) return false;
     if (state.reloadTimer > 0) return false;
-    if (state.swimming) return false; // Cannot fire weapons while swimming
+    if (state.swimming && !extraTargets.fromVehicle) return false;
     const weapon = WEAPONS[state.activeWeaponIdx] ?? WEAPONS[0];
     const ammo = state.weaponAmmo[weapon.id];
+
+    // Drive-by shooting from vehicles only allowed with Pistol or Vector SMG!
+    if (extraTargets.fromVehicle && weapon.id !== 'pistol' && weapon.id !== 'smg') {
+      return false;
+    }
 
     if (!weapon.melee) {
       if (ammo.clip <= 0) {
@@ -279,7 +362,7 @@ export class CombatSystem {
     this.fireCooldown = weapon.fireRate;
     if (weapon.melee) {
       if (player.triggerMeleeSwing) player.triggerMeleeSwing();
-    } else {
+    } else if (!extraTargets.fromVehicle) {
       if (player.setCombatPose) player.setCombatPose(true);
       player.flashMuzzle(0.08);
     }
@@ -290,79 +373,141 @@ export class CombatSystem {
     }
     if (onCrime) onCrime(weapon.melee ? 'melee' : 'gunshot');
 
-    const rawOrigin = player.getMuzzleWorldPos ? player.getMuzzleWorldPos() : player.pos.clone().add(new THREE.Vector3(0, 1.42, 0));
+    const rawOrigin = extraTargets.origin
+      ? extraTargets.origin.clone()
+      : (player.getMuzzleWorldPos ? player.getMuzzleWorldPos() : player.pos.clone().add(new THREE.Vector3(0, 1.42, 0)));
     const origin = rawOrigin.clone();
-    origin.y = Math.max((player.pos?.y ?? 0) + 1.18, origin.y);
-    const pellets = weapon.pellets ?? 1;
+    if (!extraTargets.origin) {
+      origin.y = Math.max((player.pos?.y ?? 0) + 1.18, origin.y);
+    }
+
     const hitTotals = new Map();
     const vehicleHitTotals = new Map();
+    const explosiveHitTotals = new Map();
     const policeOfficers = extraTargets.footOfficers ?? [];
     const peds = extraTargets.peds ?? [];
     const vehicles = extraTargets.vehicles ?? [];
+    const explosives = extraTargets.explosives ?? [];
+    const ignoreVehicle = extraTargets.ignoreVehicle ?? null;
 
-    for (let p = 0; p < pellets; p++) {
-      const dir = aimDir.clone();
-      dir.x += (Math.random() - 0.5) * weapon.spread;
-      dir.y += (Math.random() - 0.5) * weapon.spread * 0.6;
-      dir.z += (Math.random() - 0.5) * weapon.spread;
-      dir.normalize();
+    // Dedicated generous close-range forward melee arc check (Fists & Alloy Bat)
+    if (weapon.melee) {
+      const pPos = player.pos;
+      const fwd = new THREE.Vector3(aimDir.x, 0, aimDir.z);
+      if (fwd.lengthSq() < 1e-4) fwd.set(Math.sin(player.yaw), 0, Math.cos(player.yaw));
+      else fwd.normalize();
+      const meleeRange = weapon.range + 0.55;
 
-      // 1. Raycast against solid 3D world (buildings, walls, overhead roofs, bridge decks, piers, AND vehicles!) FIRST!
-      const envHit = this.collisionWorld
-        ? this.collisionWorld.raycast(origin, dir, weapon.range, { vehicles })
-        : null;
-
-      let bestDist = envHit ? envHit.dist : weapon.range;
-      let hitTarget = null;
-      let hitKind = null;
-      let hitHead = false;
-
-      // 2. Check ALL human pools strictly closer than the solid obstruction!
-      const checkList = (arr, kind) => {
+      const checkMeleeList = (arr, kind) => {
         for (const e of arr) {
           if (e.dead || e.downed) continue;
           const pos = e.pos ?? e.mesh.position;
-          const res = this._testHumanRay(origin, dir, bestDist, pos);
-          if (res) {
-            bestDist = res.dist;
-            hitTarget = e;
-            hitKind = kind;
-            hitHead = res.isHead;
-          }
+          const dx = pos.x - pPos.x;
+          const dz = pos.z - pPos.z;
+          const dy = Math.abs((pos.y ?? 0) - (pPos.y ?? 0));
+          const dist = Math.hypot(dx, dz);
+          if (dist > meleeRange || dy > 2.2) continue;
+          const dirX = dist > 0.01 ? dx / dist : fwd.x;
+          const dirZ = dist > 0.01 ? dz / dist : fwd.z;
+          const dot = dirX * fwd.x + dirZ * fwd.z;
+          if (dist > 1.25 && dot < 0.22) continue;
+          const hitPt = new THREE.Vector3(pos.x, (pos.y ?? 0) + 1.35, pos.z);
+          hitTotals.set(e, {
+            kind,
+            dmg: weapon.damage,
+            crit: weapon.id === 'bat' && Math.random() < 0.25,
+            pos: hitPt,
+            dir: new THREE.Vector3(dirX, 0, dirZ),
+          });
+          this.spawnSparks(hitPt, 5, 0xffc857);
+          if (hitTotals.size >= 2) return;
         }
       };
+      checkMeleeList(this.enemies, 'enemy');
+      if (hitTotals.size < 2) checkMeleeList(policeOfficers, 'police');
+      if (hitTotals.size < 2) checkMeleeList(peds, 'ped');
+    } else {
+      const pellets = weapon.pellets ?? 1;
+      for (let p = 0; p < pellets; p++) {
+        const dir = aimDir.clone();
+        dir.x += (Math.random() - 0.5) * weapon.spread;
+        dir.y += (Math.random() - 0.5) * weapon.spread * 0.6;
+        dir.z += (Math.random() - 0.5) * weapon.spread;
+        dir.normalize();
 
-      checkList(this.enemies, 'enemy');
-      checkList(policeOfficers, 'police');
-      checkList(peds, 'ped');
+        // 1. Raycast against solid 3D world (buildings, walls, overhead roofs, bridge decks, piers, AND vehicles!) FIRST!
+        const envHit = this.collisionWorld
+          ? this.collisionWorld.raycast(origin, dir, weapon.range, { vehicles, ignoreVehicle })
+          : null;
 
-      const endPoint = origin.clone().addScaledVector(dir, bestDist);
-      if (!weapon.melee) {
+        let bestDist = envHit ? envHit.dist : weapon.range;
+        let hitTarget = null;
+        let hitKind = null;
+        let hitHead = false;
+        let hitExplosive = null;
+        let hitExplosivePt = null;
+
+        // 2. Check explosive gas pumps & red fuel barrels
+        for (const exp of explosives) {
+          if (exp.exploded) continue;
+          const eres = this._testExplosiveRay(origin, dir, bestDist, exp);
+          if (eres) {
+            bestDist = eres.dist;
+            hitExplosive = exp;
+            hitExplosivePt = eres.point;
+          }
+        }
+
+        // 3. Check ALL human pools strictly closer than the solid obstruction!
+        const checkList = (arr, kind) => {
+          for (const e of arr) {
+            if (e.dead || e.downed) continue;
+            const pos = e.pos ?? e.mesh.position;
+            const res = this._testHumanRay(origin, dir, bestDist, pos);
+            if (res) {
+              bestDist = res.dist;
+              hitTarget = e;
+              hitKind = kind;
+              hitHead = res.isHead;
+              hitExplosive = null;
+            }
+          }
+        };
+
+        checkList(this.enemies, 'enemy');
+        checkList(policeOfficers, 'police');
+        checkList(peds, 'ped');
+
+        const endPoint = origin.clone().addScaledVector(dir, bestDist);
         this.spawnTracer(origin, endPoint, 0xffe47a, 0.038, 0.14);
-      }
 
-      if (hitTarget) {
-        const isCrit = hitHead || Math.random() < 0.15;
-        const dmg = Math.round(weapon.damage * (isCrit ? 1.5 : 1.0));
-        const prev = hitTotals.get(hitTarget) ?? { kind: hitKind, dmg: 0, crit: false, pos: endPoint, dir };
-        prev.dmg += dmg;
-        prev.crit = prev.crit || isCrit;
-        prev.pos = endPoint;
-        hitTotals.set(hitTarget, prev);
-        this.spawnSparks(endPoint, pellets > 1 ? 3 : 6, 0xff8040);
-      } else if (envHit) {
-        if (envHit.vehicle) {
-          const prev = vehicleHitTotals.get(envHit.vehicle) ?? {
-            dmg: 0,
-            point: new THREE.Vector3(envHit.point.x, envHit.point.y, envHit.point.z),
-            normal: envHit.normal,
-          };
+        if (hitTarget) {
+          const isCrit = hitHead || Math.random() < 0.15;
+          const dmg = Math.round(weapon.damage * (isCrit ? 1.5 : 1.0));
+          const prev = hitTotals.get(hitTarget) ?? { kind: hitKind, dmg: 0, crit: false, pos: endPoint, dir };
+          prev.dmg += dmg;
+          prev.crit = prev.crit || isCrit;
+          prev.pos = endPoint;
+          hitTotals.set(hitTarget, prev);
+          this.spawnSparks(endPoint, pellets > 1 ? 3 : 6, 0xff8040);
+        } else if (hitExplosive) {
+          const prev = explosiveHitTotals.get(hitExplosive) ?? { dmg: 0, point: hitExplosivePt };
           prev.dmg += weapon.damage;
-          vehicleHitTotals.set(envHit.vehicle, prev);
-          this.spawnSparks(new THREE.Vector3(envHit.point.x, envHit.point.y, envHit.point.z), pellets > 1 ? 4 : 8, 0xffe073);
-        } else {
-          // Solid building/wall/bridge/roof obstruction ricochet spark!
-          this.spawnSparks(new THREE.Vector3(envHit.point.x, envHit.point.y, envHit.point.z), pellets > 1 ? 2 : 5, 0xffd27a);
+          explosiveHitTotals.set(hitExplosive, prev);
+          this.spawnSparks(hitExplosivePt, 8, 0xffa638);
+        } else if (envHit) {
+          if (envHit.vehicle) {
+            const prev = vehicleHitTotals.get(envHit.vehicle) ?? {
+              dmg: 0,
+              point: new THREE.Vector3(envHit.point.x, envHit.point.y, envHit.point.z),
+              normal: envHit.normal,
+            };
+            prev.dmg += weapon.damage;
+            vehicleHitTotals.set(envHit.vehicle, prev);
+            this.spawnSparks(new THREE.Vector3(envHit.point.x, envHit.point.y, envHit.point.z), pellets > 1 ? 4 : 8, 0xffe073);
+          } else {
+            this.spawnSparks(new THREE.Vector3(envHit.point.x, envHit.point.y, envHit.point.z), pellets > 1 ? 2 : 5, 0xffd27a);
+          }
         }
       }
     }
@@ -390,6 +535,12 @@ export class CombatSystem {
           onEnemyDown,
         });
       }
+    }
+
+    // Apply explosive hits (gas pumps & red fuel barrels!)
+    for (const [exp, info] of explosiveHitTotals.entries()) {
+      if (audio) audio.playMetalHit();
+      if (extraTargets.onExplosiveShot) extraTargets.onExplosiveShot(exp, info.dmg, info.point);
     }
 
     // Apply vehicle bullet hits
@@ -465,15 +616,53 @@ export class CombatSystem {
       }
     }
 
-    // Update pickups
+    // Update spinning floating pickups (world pickups respawn after 45s; dropped pickups clear once collected)
     for (let i = this.pickups.length - 1; i >= 0; i--) {
       const p = this.pickups[i];
-      p.mesh.rotation.y += dt * 2.8;
-      if (p.pos.distanceTo(playerPos) < 2.4) {
-        if (p.kind === 'health') state.health = Math.min(state.maxHealth, state.health + 25);
-        else state.armor = Math.min(state.maxArmor, state.armor + 25);
-        this.group.remove(p.mesh);
-        this.pickups.splice(i, 1);
+      if (p.collected) {
+        if (p.respawnSec > 0) {
+          p.respawnTimer -= dt;
+          if (p.respawnTimer <= 0) {
+            p.collected = false;
+            p.mesh.visible = true;
+          }
+        }
+        continue;
+      }
+      p.mesh.rotation.y += dt * 2.6;
+      p.mesh.position.y = p.baseY + Math.sin(elapsed * 3.0 + i) * 0.16;
+      const distXZ = Math.hypot(p.pos.x - playerPos.x, p.pos.z - playerPos.z);
+      if (distXZ < 2.6 && Math.abs((p.baseY - 0.95) - (playerPos.y ?? 0)) < 2.5) {
+        if (p.kind === 'health') {
+          state.health = Math.min(state.maxHealth, state.health + (p.amount ?? 35));
+          state.toast = { text: '+MEDKIT RESTORED', timer: 2.0 };
+        } else if (p.kind === 'armor') {
+          state.armor = Math.min(state.maxArmor, state.armor + (p.amount ?? 35));
+          state.toast = { text: '+ARMOR VEST EQUIPPED', timer: 2.0 };
+        } else if (p.kind === 'ammo') {
+          const mult = p.amount ?? 1;
+          for (const w of WEAPONS) {
+            if (!w.melee && state.weaponAmmo[w.id]) {
+              state.weaponAmmo[w.id].reserve += w.clip * mult;
+            }
+          }
+          state.toast = { text: '+AMMO CRATE COLLECTED', timer: 2.0 };
+        } else if (p.kind === 'cash') {
+          const amt = p.amount ?? 450;
+          state.cash += amt;
+          state.careerStats.cashEarned += amt;
+          state.toast = { text: `+$${amt.toLocaleString()} CASH`, timer: 2.0 };
+        }
+        if (audio && audio.playPickupChime) audio.playPickupChime();
+        else if (audio) audio.playUiBeep(920);
+        if (p.respawnSec > 0) {
+          p.collected = true;
+          p.respawnTimer = p.respawnSec;
+          p.mesh.visible = false;
+        } else {
+          this.group.remove(p.mesh);
+          this.pickups.splice(i, 1);
+        }
       }
     }
 
@@ -484,7 +673,7 @@ export class CombatSystem {
       if (e.dead || e.downed) {
         e.deathTimer = (e.deathTimer ?? 0) + dt;
         if (e.deathTimer <= 0.6) {
-          poseHumanCollapse(e.mesh, Math.min(1, e.deathTimer / 0.46), e.fallSide ?? 1);
+          poseHumanCollapse(e.mesh, Math.min(1, e.deathTimer / 0.46), e.fallSide ?? 1, e.deathBaseY ?? 0);
         }
         if (e.deathTimer >= 25) {
           this.group.remove(e.mesh);
@@ -506,14 +695,15 @@ export class CombatSystem {
         e.knockVel.multiplyScalar(Math.pow(0.08, dt));
         if (this.collisionWorld) this.collisionWorld.moveAndSlide(e.pos, e.knockVel, 0.55, dt);
         else { e.pos.x += e.knockVel.x * dt; e.pos.z += e.knockVel.z * dt; }
+        const baseY = this.collisionWorld ? this.collisionWorld.getSurfaceHeight(e.pos.x, e.pos.z, e.pos.y) : 0;
         const f = e.knockdownTimer < 0.45 ? e.knockdownTimer / 0.45 : 1.0;
-        e.mesh.position.y = 0.18 * f;
+        e.mesh.position.y = baseY + 0.18 * f;
         e.mesh.rotation.x = -Math.PI * 0.48 * f;
         continue;
       }
       e.mesh.rotation.x = 0;
       e.mesh.rotation.z = 0;
-      e.mesh.position.y = 0;
+      e.mesh.position.y = this.collisionWorld ? this.collisionWorld.getSurfaceHeight(e.pos.x, e.pos.z, e.pos.y) : 0;
 
       const dx = playerPos.x - e.pos.x;
       const dz = playerPos.z - e.pos.z;

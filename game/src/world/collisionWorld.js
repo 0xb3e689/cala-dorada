@@ -224,8 +224,24 @@ export class CollisionWorld {
     return hit === null;
   }
 
-  // Resolve a circle (x, z, radius) against all nearby AABB colliders respecting 3D vertical clearance (minY..maxY).
-  resolveCircle(pos, vel, radius, opts = {}) {
+  // Resolve a circle (x, z, radius) against all nearby AABB colliders respecting strict 3D vertical overlap:
+  // (y + height > box.minY && y < box.maxY). Supports both (pos, vel, radius, opts) and (x, z, radius, y, height).
+  resolveCircle(posOrX, velOrZ, radius, optsOrY = {}, heightArg = 1.85) {
+    let pos;
+    let vel;
+    let opts;
+    let numericMode = false;
+    if (typeof posOrX === 'number') {
+      numericMode = true;
+      pos = { x: posOrX, y: typeof optsOrY === 'number' ? optsOrY : 0, z: velOrZ };
+      vel = null;
+      opts = { entityHeight: heightArg };
+    } else {
+      pos = posOrX;
+      vel = velOrZ;
+      opts = optsOrY || {};
+    }
+
     const bounce = opts.bounce ?? 0;
     const entityY = pos.y ?? 0;
     const entityHeight = opts.entityHeight ?? 1.85;
@@ -241,8 +257,10 @@ export class CollisionWorld {
 
       for (let i = 0; i < candidates.length; i++) {
         const c = candidates[i];
-        // Respect vertical 3D clearance: walk/drive cleanly UNDER overhead bridge decks & cover roofs!
-        if (entityY >= c.maxY - 0.1 || (entityY + entityHeight) <= c.minY + 0.05) continue;
+        // Overhead bridge deck slabs are raycast/LOS blockers (e.g., HALCÓN-1), NEVER horizontal road walls!
+        if (c.tag === 'bridge-deck') continue;
+        // Strict 3D vertical overlap check: skip boxes strictly above or strictly below the entity!
+        if (!((entityY + entityHeight) > c.minY + 0.05 && entityY < c.maxY - 0.05)) continue;
 
         const closestX = Math.max(c.minX, Math.min(pos.x, c.maxX));
         const closestZ = Math.max(c.minZ, Math.min(pos.z, c.maxZ));
@@ -304,6 +322,9 @@ export class CollisionWorld {
       if (!resolvedAny) break;
     }
 
+    if (numericMode) {
+      return { hit: anyHit, x: pos.x, z: pos.z, normalX: outNx, normalZ: outNz, impactSpeed: bestImpact, tag: hitTag };
+    }
     return { hit: anyHit, normalX: outNx, normalZ: outNz, impactSpeed: bestImpact, tag: hitTag };
   }
 
@@ -319,6 +340,11 @@ export class CollisionWorld {
     for (let s = 0; s < steps; s++) {
       pos.x += vel.x * subDt;
       pos.z += vel.z * subDt;
+      // Continuously update elevation along bridge ramps during sub-stepping so fast vehicles NEVER lag behind the deck!
+      if (opts.followSurface !== false) {
+        const surfY = this.getSurfaceHeight(pos.x, pos.z, pos.y ?? 0);
+        if (surfY > (pos.y ?? 0)) pos.y = surfY;
+      }
       const r = this.resolveCircle(pos, vel, radius, opts);
       if (r.hit) {
         result.hit = true;
@@ -350,21 +376,27 @@ export class CollisionWorld {
     return 0;
   }
 
-  // Returns the road/ground surface elevation for an entity at currentY:
-  // Entities approaching along ramps ride smoothly up onto the elevated bridge deck;
-  // Entities walking/swimming/driving UNDERNEATH (currentY < deckY - 2.0) stay cleanly on the ground/river at y = 0!
-  getSurfaceY(x, z, currentY = 0) {
+  // Smooth continuous surface elevation query:
+  // - Approaching a bridge from street level along the ramp lifts entity smoothly from y = 0 up to y = deckY
+  //   and down the far ramp back to y = 0.
+  // - When ALREADY underneath the elevated span (currentY < deckY - 1.5), keeps entity cleanly underneath
+  //   on the river/underpass floor (y = 0) — NEVER teleporting them up onto the bridge deck!
+  getSurfaceHeight(x, z, currentY = 0) {
     const deckY = this.getBridgeDeckY(x, z);
-    if (deckY > 0.01 && currentY >= deckY - 2.15) {
-      return deckY;
-    }
-    return 0;
+    if (deckY <= 0.001) return 0;
+    if (currentY < deckY - 1.5) return 0;
+    return deckY;
+  }
+
+  // Alias preserved for existing callers
+  getSurfaceY(x, z, currentY = 0) {
+    return this.getSurfaceHeight(x, z, currentY);
   }
 
   // Check if a point is on top of a bridge deck
   isOnBridgeDeck(x, z, entityY = 6) {
     const deckY = this.getBridgeDeckY(x, z);
-    return deckY > 0.15 && entityY >= deckY - 2.15;
+    return deckY > 0.15 && entityY >= deckY - 1.5;
   }
 
   // Check if a point is on a wooden fishing pier
@@ -385,11 +417,11 @@ export class CollisionWorld {
       depth = Math.max(depth, Math.min(4.8, (z - 274) * 0.14));
     }
 
-    // 2. Marina Bay channel cutting north under Puente del Sol (x in [52..168], z in [156..278])
-    // Note: leaves dry concrete underpass walkways on [40..52] and [168..180] so players can walk/drive OR swim under Puente del Sol!
-    if (x > 52 && x < 168 && z > 156 && z <= 278) {
-      const edgeDist = Math.min(x - 52, 168 - x, z - 156);
-      depth = Math.max(depth, Math.min(3.8, edgeDist * 0.26));
+    // 2. Marina Bay channel cutting north under Puente del Sol (x in [66..154], z in [156..278])
+    // Leaves dry concrete underpass walkways under full 5.8m clearance on [56..66] and [154..164]!
+    if (x > 66 && x < 154 && z > 156 && z <= 278) {
+      const edgeDist = Math.min(x - 66, 154 - x, z - 156);
+      depth = Math.max(depth, Math.min(3.8, edgeDist * 0.28));
     }
 
     // 3. Scenic Navigable River: RÍO DORADO (z from -438 to 165)

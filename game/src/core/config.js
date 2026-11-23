@@ -112,6 +112,16 @@ export const VEHICLES = {
     maxSpeed: 36.6, accel: 19, brake: 34, turnRate: 1.65, driftGrip: 0.84,
     maxHp: 260, color: 0x1c2536, accent: 0x3d557d, length: 6.2, width: 2.6, height: 2.55, isPolice: true, isSwat: true,
   },
+  cala_cab: {
+    id: 'cala_cab', name: 'Cala Cab Taxi', cls: 'TAXI',
+    maxSpeed: 54.0, accel: 26, brake: 44, turnRate: 2.26, driftGrip: 0.89,
+    maxHp: 135, color: 0xffc824, accent: 0x161a24, length: 4.75, width: 2.12, height: 1.44, isTaxi: true,
+  },
+  speedboat: {
+    id: 'speedboat', name: 'Esmeralda Speedboat', cls: 'MARINE',
+    maxSpeed: 38.0, accel: 21, brake: 18, turnRate: 2.15, driftGrip: 0.78,
+    maxHp: 180, color: 0xf4f8fc, accent: 0x1ec8b8, length: 6.4, width: 2.35, height: 1.35, isBoat: true,
+  },
 };
 
 export const WEAPONS = [
@@ -382,7 +392,7 @@ export const PROPERTIES = [
     kind: 'garage',
     district: 'barrio-viejo',
     districtLabel: 'Barrio Viejo',
-    x: 150,
+    x: 156,
     z: -242,
     radius: 17,
     price: 0,

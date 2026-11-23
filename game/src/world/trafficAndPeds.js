@@ -25,9 +25,9 @@ export class TrafficAndPeds {
   }
 
   _spawnTraffic() {
-    const types = ['cabo_gt', 'convertible', 'baja_runner', 'scooter', 'cabo_gt', 'convertible'];
+    const types = ['cabo_gt', 'convertible', 'cala_cab', 'baja_runner', 'scooter', 'cabo_gt', 'cala_cab', 'convertible'];
     const palette = [
-      0x39c2b8, 0xf2b138, 0xe85a4f, 0x5c80bc, 0xf4f4f6,
+      0x39c2b8, 0xf2b138, 0xffc824, 0xe85a4f, 0x5c80bc, 0xf4f4f6,
       0xff5e7e, 0x8ac926, 0xff8c42, 0x3b82f6, 0xe6c229,
     ];
     let idx = 0;
@@ -42,6 +42,10 @@ export class TrafficAndPeds {
         pos: mesh.position,
         yaw: mesh.rotation.y,
         vel: new THREE.Vector3(),
+        knockVel: new THREE.Vector3(),
+        yawSpin: 0,
+        displacedTimer: 0,
+        yieldOffset: 0,
         axis,
         dir,
         laneCoord,
@@ -52,12 +56,18 @@ export class TrafficAndPeds {
         hp: spec.maxHp,
         maxHp: spec.maxHp,
         condition: 100,
+        nitro: 100,
         burning: false,
         fireCountdown: 0,
         exploded: false,
         smokeTimer: 0,
         crackleTimer: 0,
+        coughTimer: 0,
+        headlightsOn: true,
+        sirenActive: false,
+        turboLevel: 1,
         isTraffic: true,
+        playerDriven: false,
       });
     };
 
@@ -66,7 +76,7 @@ export class TrafficAndPeds {
       for (let i = 0; i < count; i++) {
         const dir = i % 2 === 0 ? 1 : -1;
         const type = types[idx % types.length];
-        const color = palette[idx % palette.length];
+        const color = type === 'cala_cab' ? 0xffc824 : palette[idx % palette.length];
         const mesh = createVehicleMesh(type, color);
         const span = 680 / count;
         const x = -335 + i * span + (idx % 3) * 14;
@@ -85,7 +95,8 @@ export class TrafficAndPeds {
       for (let i = 0; i < count; i++) {
         const dir = i % 2 === 0 ? 1 : -1;
         const type = types[(idx + 1) % types.length];
-        const mesh = createVehicleMesh(type, palette[(idx + 3) % palette.length]);
+        const color = type === 'cala_cab' ? 0xffc824 : palette[(idx + 3) % palette.length];
+        const mesh = createVehicleMesh(type, color);
         const x = rx + (dir > 0 ? -4.8 : 4.8);
         const span = 530 / count;
         const z = -325 + i * span + (idx % 3) * 10;
@@ -197,15 +208,32 @@ export class TrafficAndPeds {
     ped.dead = true;
     ped.downed = true;
     ped.deathTimer = 0.001;
+    ped.deathBaseY = ped.mesh.position.y ?? 0;
     ped.knockdownTimer = 0;
     if (!ped.bloodMark) {
       const mark = new THREE.Mesh(this._bloodGeo, this._bloodMat);
       mark.rotation.x = -Math.PI / 2;
-      mark.position.set(ped.mesh.position.x, 0.04, ped.mesh.position.z);
+      mark.position.set(ped.mesh.position.x, ped.deathBaseY + 0.04, ped.mesh.position.z);
       this.group.add(mark);
       ped.bloodMark = mark;
     }
-    poseHumanCollapse(ped.mesh, 0.12, ped.fallSide);
+    poseHumanCollapse(ped.mesh, 0.12, ped.fallSide, ped.deathBaseY);
+  }
+
+  reactToHorn(originPos, radius = 22) {
+    let reacted = 0;
+    for (const p of this.peds) {
+      if (p.role === 'vendor' || p.dead || p.downed) continue;
+      const dx = p.mesh.position.x - originPos.x;
+      const dz = p.mesh.position.z - originPos.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < radius * radius) {
+        p.panicTimer = Math.max(p.panicTimer, 1.8);
+        p.fleeYaw = Math.atan2(dx, dz);
+        reacted++;
+      }
+    }
+    return reacted;
   }
 
   triggerPanicNear(pos, radius = 48) {
@@ -254,24 +282,76 @@ export class TrafficAndPeds {
     return { hit: true, killed: false };
   }
 
-  update(dt, elapsed, playerPos, panicActive) {
-    // Update civilian cars
+  update(dt, elapsed, playerPos, panicActive, sirenSource = null) {
+    // Update civilian cars (with solid collision knockback/spin, bridge elevation & siren pull-aside yielding!)
     for (const c of this.cars) {
+      if (c.playerDriven) continue;
       if (c.exploded || c.burning) {
         c.curSpeed = 0;
+        if (c.knockVel && c.knockVel.lengthSq() > 0.02) {
+          c.knockVel.multiplyScalar(Math.pow(0.08, dt));
+          if (this.collisionWorld) this.collisionWorld.moveAndSlide(c.mesh.position, c.knockVel, 1.6, dt, { bounce: 0.2 });
+          else { c.mesh.position.x += c.knockVel.x * dt; c.mesh.position.z += c.knockVel.z * dt; }
+        }
         continue;
       }
+
+      // Apply collision knockback velocity & yaw spin impulse when rammed!
+      if ((c.displacedTimer ?? 0) > 0 || (c.knockVel && c.knockVel.lengthSq() > 0.04)) {
+        c.displacedTimer = Math.max(0, (c.displacedTimer ?? 0) - dt);
+        if (c.knockVel) {
+          c.knockVel.multiplyScalar(Math.pow(0.08, dt));
+          if (this.collisionWorld) {
+            this.collisionWorld.moveAndSlide(c.mesh.position, c.knockVel, 1.55, dt, { bounce: 0.22 });
+          } else {
+            c.mesh.position.x += c.knockVel.x * dt;
+            c.mesh.position.z += c.knockVel.z * dt;
+          }
+          c.vel.copy(c.knockVel);
+        }
+        if (Math.abs(c.yawSpin ?? 0) > 0.01) {
+          c.mesh.rotation.y += c.yawSpin * dt;
+          c.yawSpin *= Math.pow(0.07, dt);
+        }
+        if (this.collisionWorld) {
+          c.mesh.position.y = this.collisionWorld.getSurfaceHeight(c.mesh.position.x, c.mesh.position.z, c.mesh.position.y);
+        }
+        c.yaw = c.mesh.rotation.y;
+        c.curSpeed = c.knockVel ? Math.hypot(c.knockVel.x, c.knockVel.z) : 0;
+        continue;
+      }
+
       const dx = c.mesh.position.x - playerPos.x;
       const dz = c.mesh.position.z - playerPos.z;
       const nearPlayer = dx * dx + dz * dz < 85;
       const condMul = c.hp / Math.max(1, c.maxHp) < 0.45 ? 0.55 : 1.0;
-      const spd = (nearPlayer ? c.speed * 0.32 : c.speed) * condMul;
+
+      // Police siren pull-aside yield when player drives a police cruiser with active siren!
+      let sirenYield = false;
+      if (sirenSource) {
+        const sdx = c.mesh.position.x - sirenSource.pos.x;
+        const sdz = c.mesh.position.z - sirenSource.pos.z;
+        const sDist = Math.hypot(sdx, sdz);
+        if (sDist < 42) {
+          const fwdDot = (sdx * Math.sin(sirenSource.yaw) + sdz * Math.cos(sirenSource.yaw)) / Math.max(1, sDist);
+          if (fwdDot > 0.15) sirenYield = true;
+        }
+      }
+      const targetYield = sirenYield ? 3.2 : 0;
+      c.yieldOffset = THREE.MathUtils.lerp(c.yieldOffset ?? 0, targetYield, Math.min(1, dt * 3.5));
+
+      const spd = (sirenYield ? c.speed * 0.22 : nearPlayer ? c.speed * 0.32 : c.speed) * condMul;
       c.curSpeed = spd;
 
       if (c.axis === 'x') {
+        const targetYaw = c.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+        c.mesh.rotation.y = THREE.MathUtils.lerp(c.mesh.rotation.y, targetYaw, Math.min(1, dt * 5));
+        const targetZ = c.laneCoord + (c.dir > 0 ? c.yieldOffset : -c.yieldOffset);
+        c.mesh.position.z = THREE.MathUtils.lerp(c.mesh.position.z, targetZ, Math.min(1, dt * 3.5));
         c.mesh.position.x += c.dir * spd * dt;
         if (c.mesh.position.x > c.max) c.mesh.position.x = c.min;
         if (c.mesh.position.x < c.min) c.mesh.position.x = c.max;
+        c.vel.set(c.dir * spd, 0, 0);
         if (this.collisionWorld) {
           const yNow = this.collisionWorld.getBridgeDeckY(c.mesh.position.x, c.mesh.position.z);
           const yAhead = this.collisionWorld.getBridgeDeckY(c.mesh.position.x + c.dir * 2.2, c.mesh.position.z);
@@ -279,9 +359,14 @@ export class TrafficAndPeds {
           c.mesh.rotation.x = -Math.atan2(yAhead - yNow, 2.2);
         }
       } else {
+        const targetYaw = c.dir > 0 ? 0 : Math.PI;
+        c.mesh.rotation.y = THREE.MathUtils.lerp(c.mesh.rotation.y, targetYaw, Math.min(1, dt * 5));
+        const targetX = c.laneCoord + (c.dir > 0 ? -c.yieldOffset : c.yieldOffset);
+        c.mesh.position.x = THREE.MathUtils.lerp(c.mesh.position.x, targetX, Math.min(1, dt * 3.5));
         c.mesh.position.z += c.dir * spd * dt;
         if (c.mesh.position.z > c.max) c.mesh.position.z = c.min;
         if (c.mesh.position.z < c.min) c.mesh.position.z = c.max;
+        c.vel.set(0, 0, c.dir * spd);
       }
       c.yaw = c.mesh.rotation.y;
       for (const w of c.mesh.userData?.wheels ?? []) {
@@ -297,7 +382,7 @@ export class TrafficAndPeds {
       if (p.dead || p.downed) {
         p.deathTimer += dt;
         if (p.deathTimer <= 0.6) {
-          poseHumanCollapse(p.mesh, Math.min(1, p.deathTimer / 0.46), p.fallSide);
+          poseHumanCollapse(p.mesh, Math.min(1, p.deathTimer / 0.46), p.fallSide, p.deathBaseY ?? 0);
         }
         if (p.deathTimer >= 25) {
           this.group.remove(p.mesh);
@@ -315,14 +400,17 @@ export class TrafficAndPeds {
         p.knockVel.multiplyScalar(Math.pow(0.08, dt));
         if (this.collisionWorld) this.collisionWorld.moveAndSlide(p.mesh.position, p.knockVel, 0.5, dt);
         else { p.mesh.position.x += p.knockVel.x * dt; p.mesh.position.z += p.knockVel.z * dt; }
+        const baseY = this.collisionWorld ? this.collisionWorld.getSurfaceHeight(p.mesh.position.x, p.mesh.position.z, p.mesh.position.y) : 0;
         const f = p.knockdownTimer < 0.45 ? p.knockdownTimer / 0.45 : 1.0;
-        p.mesh.position.y = 0.18 * f;
+        p.mesh.position.y = baseY + 0.18 * f;
         p.mesh.rotation.x = -Math.PI * 0.48 * f;
         continue;
       }
       p.mesh.rotation.x = 0;
       p.mesh.rotation.z = 0;
-      p.mesh.position.y = 0;
+      p.mesh.position.y = this.collisionWorld
+        ? this.collisionWorld.getSurfaceHeight(p.mesh.position.x, p.mesh.position.z, p.mesh.position.y)
+        : 0;
 
       if (panicActive && p.role !== 'vendor') {
         const d2 = (p.mesh.position.x - playerPos.x) ** 2 + (p.mesh.position.z - playerPos.z) ** 2;

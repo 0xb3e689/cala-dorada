@@ -137,9 +137,9 @@ export class SaveManager {
     return [1, 2, 3].map((n) => ({ slot: n, data: this.slots[n] ?? null }));
   }
 
-  saveSlot(slotNum, state) {
+  saveSlot(slotNum, state, worldSnap = null) {
     state.activeSlot = slotNum;
-    this.slots[slotNum] = serializeStateForSave(state);
+    this.slots[slotNum] = serializeStateForSave(state, worldSnap);
     this._persist();
     return this.slots[slotNum];
   }

@@ -138,7 +138,7 @@ export function createInitialState() {
     settings: {
       sfxVolume: 0.75,
       radioVolume: 0.55,
-      cameraMode: 'chase', // 'chase' | 'action' | 'hood'
+      cameraMode: 'medium', // 'close' | 'medium' | 'far'
       shadows: true,
     },
   };
@@ -206,9 +206,13 @@ export function formatTimeClock(hoursFloat) {
   return { text: `${pad(h)}:${pad(m)}`, phase };
 }
 
-export function serializeStateForSave(state) {
+export function serializeStateForSave(state, worldSnap = null) {
   const mission = MISSIONS.find((m) => m.id === state.activeMissionId) ?? MISSIONS[0];
   const dist = DISTRICTS.find((d) => d.id === state.currentDistrictId) ?? DISTRICTS[0];
+  const weaponAmmoCopy = {};
+  for (const [wid, val] of Object.entries(state.weaponAmmo ?? {})) {
+    weaponAmmoCopy[wid] = { clip: val.clip, reserve: val.reserve };
+  }
   return {
     savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     savedDate: new Date().toLocaleDateString([], { month: 'short', day: 'numeric' }),
@@ -218,7 +222,14 @@ export function serializeStateForSave(state) {
     districtName: dist.name,
     cash: Math.round(state.cash),
     rp: Math.round(state.rp),
+    health: Math.round(state.health ?? 100),
+    armor: Math.round(state.armor ?? 0),
     timeOfDay: state.timeOfDay,
+    inVehicle: Boolean(state.inVehicle),
+    activeWeaponIdx: state.activeWeaponIdx ?? 2,
+    weaponAmmo: weaponAmmoCopy,
+    playerPos: worldSnap?.playerPos ?? state.savedPlayerPos ?? null,
+    vehiclePos: worldSnap?.vehiclePos ?? state.savedVehiclePos ?? null,
     activeMissionId: state.activeMissionId,
     missionStageIdx: state.missionStageIdx,
     completedMissions: { ...state.completedMissions },
@@ -242,7 +253,23 @@ export function applySavedData(state, data) {
   if (!data) return;
   state.cash = data.cash ?? state.cash;
   state.rp = data.rp ?? state.rp;
+  if (typeof data.health === 'number') state.health = Math.max(10, Math.min(state.maxHealth, data.health));
+  if (typeof data.armor === 'number') state.armor = Math.max(0, Math.min(state.maxArmor, data.armor));
   state.timeOfDay = data.timeOfDay ?? state.timeOfDay;
+  if (typeof data.inVehicle === 'boolean') state.inVehicle = data.inVehicle;
+  if (typeof data.activeWeaponIdx === 'number') {
+    state.activeWeaponIdx = Math.max(0, Math.min(WEAPONS.length - 1, data.activeWeaponIdx));
+    state.activeWeaponId = WEAPONS[state.activeWeaponIdx]?.id ?? state.activeWeaponId;
+  }
+  if (data.weaponAmmo) {
+    for (const [wid, val] of Object.entries(data.weaponAmmo)) {
+      if (state.weaponAmmo[wid]) {
+        state.weaponAmmo[wid] = { clip: val.clip, reserve: val.reserve };
+      }
+    }
+  }
+  state.savedPlayerPos = data.playerPos ? { ...data.playerPos } : null;
+  state.savedVehiclePos = data.vehiclePos ? { ...data.vehiclePos } : null;
   state.activeMissionId = data.activeMissionId ?? state.activeMissionId;
   state.missionStageIdx = data.missionStageIdx ?? 0;
   state.completedMissions = { ...(data.completedMissions ?? {}) };

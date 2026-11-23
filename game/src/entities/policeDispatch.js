@@ -180,16 +180,17 @@ export class PoliceDispatch {
       off.downed = true;
       off.attacking = false;
       off.deathTimer = 0.001;
+      off.deathBaseY = off.pos.y ?? 0;
       off.knockdownTimer = 0;
       if (off.mesh.userData.muzzleFlash) off.mesh.userData.muzzleFlash.visible = false;
       if (!off.bloodMark) {
         const mark = new THREE.Mesh(this._bloodGeo, this._bloodMat);
         mark.rotation.x = -Math.PI / 2;
-        mark.position.set(off.pos.x, off.pos.y + 0.04, off.pos.z);
+        mark.position.set(off.pos.x, off.deathBaseY + 0.04, off.pos.z);
         this.group.add(mark);
         off.bloodMark = mark;
       }
-      poseHumanCollapse(off.mesh, 0.12, off.fallSide ?? 1);
+      poseHumanCollapse(off.mesh, 0.12, off.fallSide ?? 1, off.deathBaseY);
       if (state) state.careerStats.takedowns += 1;
       return { killed: true };
     }
@@ -215,8 +216,12 @@ export class PoliceDispatch {
       const isSwat = state.wantedLevel >= 4 && idx === 2;
       const angle = playerYaw + Math.PI + (idx - 1.5) * 0.65;
       const dist = 54 + idx * 14;
-      const sx = Math.max(-420, Math.min(420, playerPos.x + Math.sin(angle) * dist));
-      const sz = Math.max(-410, Math.min(235, playerPos.z + Math.cos(angle) * dist));
+      let sx = Math.max(-420, Math.min(420, playerPos.x + Math.sin(angle) * dist));
+      let sz = Math.max(-410, Math.min(212, playerPos.z + Math.cos(angle) * dist));
+      // Ensure cruisers NEVER spawn floating over Río Dorado or Marina Bay water!
+      if (this.collisionWorld && this.collisionWorld.getWaterDepth(sx, sz, this.collisionWorld.getBridgeDeckY(sx, sz)) > 0.25) {
+        sx = sx < 145 ? 102 : 182;
+      }
       const tactic = isSwat ? 'ROADBLOCK' : idx === 0 ? 'RAMMING' : idx % 2 === 1 ? 'FLANKING' : 'CLOSING IN';
       const u = this.spawnUnit(CALLSIGNS[idx % CALLSIGNS.length], isSwat, sx, sz, playerYaw, tactic);
       if (this.collisionWorld) {
@@ -245,6 +250,7 @@ export class PoliceDispatch {
     let closestPoliceDist = 999;
 
     this.units.forEach((u, idx) => {
+      if (u.playerDriven) return;
       if (u.exploded) {
         u.speed = 0;
         u.disabled = true;
@@ -315,13 +321,32 @@ export class PoliceDispatch {
 
       u.vel.set(Math.sin(u.yaw) * u.speed, 0, Math.cos(u.yaw) * u.speed);
       if (this.collisionWorld) {
+        const prevX = u.pos.x;
+        const prevZ = u.pos.z;
         const hit = this.collisionWorld.moveAndSlide(u.pos, u.vel, u.isSwat ? 2.6 : 2.1, dt, { bounce: 0.25 });
         if (hit.hit) {
           u.yaw += 0.9 * dt;
           u.speed = Math.hypot(u.vel.x, u.vel.z);
         }
-        const surfY = this.collisionWorld.getSurfaceY(u.pos.x, u.pos.z, u.pos.y);
-        u.pos.y = THREE.MathUtils.lerp(u.pos.y, surfY, Math.min(1, dt * 14));
+        const surfY = this.collisionWorld.getSurfaceHeight(u.pos.x, u.pos.z, u.pos.y);
+        // Prevent AI cruisers from driving straight into deep river/ocean water off bridges!
+        if (this.collisionWorld.getWaterDepth(u.pos.x, u.pos.z, surfY) > 0.65) {
+          u.pos.x = prevX;
+          u.pos.z = prevZ;
+          u.yaw += 1.6 * dt;
+          u.speed *= 0.5;
+        } else {
+          u.pos.y = surfY > u.pos.y ? surfY : THREE.MathUtils.lerp(u.pos.y, surfY, Math.min(1, dt * 18));
+        }
+        if (surfY > 0.05) {
+          const nfx = Math.sin(u.yaw);
+          const nfz = Math.cos(u.yaw);
+          const aY = this.collisionWorld.getSurfaceHeight(u.pos.x + nfx * 2.2, u.pos.z + nfz * 2.2, u.pos.y);
+          const bY = this.collisionWorld.getSurfaceHeight(u.pos.x - nfx * 2.2, u.pos.z - nfz * 2.2, u.pos.y);
+          u.mesh.rotation.x = THREE.MathUtils.lerp(u.mesh.rotation.x, -Math.atan2(aY - bY, 4.4), Math.min(1, dt * 10));
+        } else {
+          u.mesh.rotation.x = THREE.MathUtils.lerp(u.mesh.rotation.x, 0, Math.min(1, dt * 10));
+        }
       } else {
         u.pos.x += u.vel.x * dt;
         u.pos.z += u.vel.z * dt;
@@ -337,7 +362,7 @@ export class PoliceDispatch {
       if (o.dead || o.downed) {
         o.deathTimer = (o.deathTimer ?? 0) + dt;
         if (o.deathTimer <= 0.6) {
-          poseHumanCollapse(o.mesh, Math.min(1, o.deathTimer / 0.46), o.fallSide ?? 1);
+          poseHumanCollapse(o.mesh, Math.min(1, o.deathTimer / 0.46), o.fallSide ?? 1, o.deathBaseY ?? 0);
         }
         if (o.deathTimer >= 25) {
           this.group.remove(o.mesh);

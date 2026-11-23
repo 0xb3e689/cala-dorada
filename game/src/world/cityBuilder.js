@@ -5,6 +5,7 @@ import { WORLD, PROPERTIES, VEHICLES } from '../core/config.js';
 import {
   ROAD_X, ROAD_Z, PUBLIC_FACILITIES, GOLDEN_SHELLS, FISHING_SPOTS, GARDEN_SITES, ROOF_REPAIR_SITES,
   getRiverCenterX, getRiverHalfWidth, RIVER_BRIDGES, COVER_BUILDINGS,
+  GAS_STATION, FUEL_BARREL_SPOTS, BOAT_DOCK_SPOTS,
 } from './cityPlan.js';
 import { CollisionWorld } from './collisionWorld.js';
 import { createSignTexture } from './textures.js';
@@ -37,6 +38,7 @@ export function buildCalaDoradaCity(scene, textures) {
     nightGlowMeshes: [],
     nightWindowMats: [],
     trafficSignals: [],
+    explosives: [],
   };
 
   // 1. Base City Terrain & Terraced Plaza Slab (ends cleanly at beach z=230 so it NEVER overlaps ocean!)
@@ -83,8 +85,8 @@ export function buildCalaDoradaCity(scene, textures) {
   root.add(ocean);
   animated.ocean = ocean;
 
-  // Marina Channel (bay water cutting right under Puente del Sol, leaving dry underpass embankments on [40..52] & [168..180])
-  const bayWater = new THREE.Mesh(new THREE.PlaneGeometry(118, 220), waterMat);
+  // Marina Channel (bay water cutting right under Puente del Sol, leaving dry underpass embankments on [56..66] & [154..164])
+  const bayWater = new THREE.Mesh(new THREE.PlaneGeometry(92, 220), waterMat);
   bayWater.rotation.x = -Math.PI / 2;
   bayWater.position.set(110, 0.03, 240);
   root.add(bayWater);
@@ -679,6 +681,10 @@ export function buildCalaDoradaCity(scene, textures) {
   // 13. Interactive World Activity Sites (Fishing Piers, Raised Garden Beds & Barrio Viejo Terracotta Roof Repair)
   buildActivityWorldSites(root, animated, collisionWorld);
 
+  // 14. Roadside Estación Sol Explosive Gas Station + Red Fuel Barrels + Drivable Docked Speedboats + Parked Cala Cab
+  buildGasStationAndExplosives(root, animated, collisionWorld);
+  buildDockedSpeedboatsAndTaxi(root, parkedVehicles);
+
   scene.add(root);
   return { root, colliders, collisionWorld, animated, parkedVehicles };
 }
@@ -1168,9 +1174,9 @@ function buildRioDorado(root, waterMat, sandMat) {
     }
   }
 
-  // Dry concrete underpass riverside walkways underneath Puente del Sol (x=40..52 and x=168..180, z=156..238)
-  for (const ex of [46, 174]) {
-    const prom = new THREE.Mesh(new THREE.BoxGeometry(12, 0.24, 82), concMat);
+  // Dry concrete underpass riverside walkways underneath Puente del Sol (x=56..66 and x=154..164, full 5.8m clearance!)
+  for (const ex of [61, 159]) {
+    const prom = new THREE.Mesh(new THREE.BoxGeometry(10.5, 0.24, 82), concMat);
     prom.position.set(ex, 0.12, 197);
     prom.receiveShadow = true;
     g.add(prom);
@@ -1251,31 +1257,33 @@ function addElevatedBridgeDeck(g, bridge, roadTex, steelMat, goldMat, collisionW
     }
   }
 
-  // Register SOLID overhead ceiling AABB (minY > 4.5m) across the flat hollow underpass span!
-  const flatX1 = x1 + rampLen * 0.85;
-  const flatX2 = x2 - rampLen * 0.85;
+  // Register SOLID overhead ceiling AABB (strictly beneath deck surface: deckY-1.15 .. deckY-0.30) across the elevated span!
+  // Blocks HALCÓN-1 helicopter LOS & gunfire from above while NEVER obstructing vehicles on the ramp or deck OR walkers underneath!
+  const flatX1 = x1 + rampLen;
+  const flatX2 = x2 - rampLen;
   if (collisionWorld && flatX2 > flatX1) {
-    collisionWorld.addBox3D(flatX1, flatX2, deckY - 0.85, deckY + 0.25, z - halfZ, z + halfZ, 'bridge-deck');
-    for (const side of [-halfZ + 0.4, halfZ - 0.4]) {
-      collisionWorld.addBox3D(flatX1, flatX2, deckY - 0.2, deckY + 2.8, z + side - 0.6, z + side + 0.6, 'bridge-rail');
+    collisionWorld.addBox3D(flatX1, flatX2, deckY - 1.15, deckY - 0.30, z - halfZ, z + halfZ, 'bridge-deck');
+    // Guardrails sit STRICTLY along the outer left & right Z edges, NEVER across road entrances/exits!
+    for (const side of [-halfZ - 0.25, halfZ + 0.25]) {
+      collisionWorld.addBox3D(x1 + 2, x2 - 2, deckY - 0.15, deckY + 2.6, z + side - 0.55, z + side + 0.55, 'bridge-rail');
     }
   }
 
-  // Support Pier Columns flanking the underpass (separate solid AABBs so vehicles & swimmers weave cleanly between them!)
+  // Support Pier Columns positioned cleanly along outer bridge edges & capped strictly below road deck so cars never snag on them!
   const pierXs = bridge.isMain
-    ? [x1 + 17, x1 + 42, x2 - 42, x2 - 17]
-    : [x1 + 14, x2 - 14];
+    ? [x1 + rampLen + 4, x1 + rampLen + 26, x2 - rampLen - 26, x2 - rampLen - 4]
+    : [x1 + rampLen + 2, x2 - rampLen - 2];
   for (const px of pierXs) {
     const py = sampleY(px);
-    const pierH = Math.max(2.5, py - 0.5);
-    for (const pzOff of [-halfZ + 2.2, halfZ - 2.2]) {
-      const pier = new THREE.Mesh(new THREE.BoxGeometry(2.2, pierH, 2.2), pierMat);
+    const pierH = Math.max(2.4, py - 1.05);
+    for (const pzOff of [-halfZ + 0.7, halfZ - 0.7]) {
+      const pier = new THREE.Mesh(new THREE.BoxGeometry(1.9, pierH, 1.9), pierMat);
       pier.position.set(px, pierH * 0.5, z + pzOff);
       pier.castShadow = true;
       pier.receiveShadow = true;
       g.add(pier);
       if (collisionWorld) {
-        collisionWorld.addRect(px, z + pzOff, 2.3, 2.3, pierH + 0.2, 'bridge-pier', 0);
+        collisionWorld.addRect(px, z + pzOff, 2.0, 2.0, pierH - 0.1, 'bridge-pier', 0);
       }
     }
   }
@@ -1351,16 +1359,16 @@ function buildPuenteDelSol(root, cx, cz, collisionWorld, animated, textures) {
     }
   }
 
-  // Twin Iconic Red & Gold Suspension Pylons
+  // Twin Iconic Red & Gold Suspension Pylons (set cleanly outside the roadway guardrails so lanes are 100% clear!)
   for (const px of [cx - 34, cx + 34]) {
-    for (const side of [-11.6, 11.6]) {
-      const towerLower = new THREE.Mesh(new THREE.BoxGeometry(3.6, 30, 3.6), redSteel);
+    for (const side of [-12.6, 12.6]) {
+      const towerLower = new THREE.Mesh(new THREE.BoxGeometry(3.4, 30, 3.4), redSteel);
       towerLower.position.set(px, 15, cz + side);
       towerLower.castShadow = true;
-      const towerUpper = new THREE.Mesh(new THREE.BoxGeometry(2.7, 23, 2.7), redSteel);
+      const towerUpper = new THREE.Mesh(new THREE.BoxGeometry(2.6, 23, 2.6), redSteel);
       towerUpper.position.set(px, 41.5, cz + side);
       towerUpper.castShadow = true;
-      const cap = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.2, 3.2), goldTrim);
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(3.1, 1.2, 3.1), goldTrim);
       cap.position.set(px, 53.4, cz + side);
       const beacon = new THREE.Sprite(new THREE.SpriteMaterial({
         map: redBeaconTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
@@ -1369,7 +1377,7 @@ function buildPuenteDelSol(root, cx, cz, collisionWorld, animated, textures) {
       beacon.position.set(px, 54.8, cz + side);
       g.add(towerLower, towerUpper, cap, beacon);
       if (collisionWorld) {
-        collisionWorld.addRect(px, cz + side, 3.8, 3.8, 54, 'bridge-tower', 0);
+        collisionWorld.addRect(px, cz + side, 3.4, 3.4, 54, 'bridge-tower', 0);
       }
     }
     for (const cy of [22, 36, 48.5]) {
@@ -2277,4 +2285,182 @@ function buildCoverBuildings(root, collisionWorld, animated, textures) {
   }
 
   root.add(g);
+}
+
+// Roadside Estación Sol Fuel Station (canopy, convenience kiosk, 4 explosive gas pumps) + Red Explosive Fuel Barrels!
+function buildGasStationAndExplosives(root, animated, collisionWorld) {
+  const g = new THREE.Group();
+  const gs = GAS_STATION;
+  const asphaltMat = new THREE.MeshStandardMaterial({ color: 0x262c36, roughness: 0.78 });
+  const canopyRed = new THREE.MeshStandardMaterial({ color: 0xe63946, roughness: 0.36, metalness: 0.25 });
+  const canopyWhite = new THREE.MeshStandardMaterial({ color: 0xf4f6fa, roughness: 0.45 });
+  const pillarMat = new THREE.MeshStandardMaterial({ color: 0xd8dee8, roughness: 0.4, metalness: 0.3 });
+  const darkMetal = new THREE.MeshStandardMaterial({ color: 0x1e2530, roughness: 0.5, metalness: 0.65 });
+  const glassMat = new THREE.MeshStandardMaterial({ color: 0x224c68, emissive: 0x5c3e18, emissiveIntensity: 0.5, roughness: 0.16, metalness: 0.75 });
+  const pumpBodyMat = new THREE.MeshStandardMaterial({ color: 0xf24141, roughness: 0.35, metalness: 0.25 });
+  const barrelRedMat = new THREE.MeshStandardMaterial({ color: 0xd92626, roughness: 0.42, metalness: 0.35 });
+  const hazardYellowMat = new THREE.MeshBasicMaterial({ color: 0xffd24d });
+  const stripMat = new THREE.MeshBasicMaterial({ color: 0xfff4d2 });
+
+  // Forecourt concrete pad
+  const pad = new THREE.Mesh(new THREE.PlaneGeometry(gs.w + 4, gs.d + 6), asphaltMat);
+  pad.rotation.x = -Math.PI / 2;
+  pad.position.set(gs.x, 0.11, gs.z + 1);
+  g.add(pad);
+
+  // Overhead Canopy Roof (solid 3D roof slab at y = 5.2..6.2 — drivable underneath!)
+  const canopyTop = new THREE.Mesh(new THREE.BoxGeometry(gs.w, 0.9, 10.5), canopyWhite);
+  canopyTop.position.set(gs.x, 5.5, gs.z + 2.5);
+  canopyTop.castShadow = true;
+  const fascia = new THREE.Mesh(new THREE.BoxGeometry(gs.w + 0.3, 0.55, 10.8), canopyRed);
+  fascia.position.set(gs.x, 5.75, gs.z + 2.5);
+  const sign = new THREE.Mesh(
+    new THREE.BoxGeometry(15.5, 2.2, 0.4),
+    new THREE.MeshBasicMaterial({ map: createSignTexture('ESTACIÓN SOL', '#1c0c12', '#ffe078', '#ff3b4e') })
+  );
+  sign.position.set(gs.x, 6.25, gs.z + 7.9);
+  g.add(canopyTop, fascia, sign);
+  collisionWorld.addBox3D(gs.x - gs.w / 2, gs.x + gs.w / 2, 5.0, 6.3, gs.z - 2.8, gs.z + 7.8, 'roof');
+
+  // 4 Canopy Support Pillars
+  for (const px of [-gs.w / 2 + 1.6, gs.w / 2 - 1.6]) {
+    for (const pz of [-2.2, 6.6]) {
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.36, 5.2, 8), pillarMat);
+      col.position.set(gs.x + px, 2.6, gs.z + pz);
+      g.add(col);
+      collisionWorld.addRect(gs.x + px, gs.z + pz, 0.8, 0.8, 5.2, 'pillar', 0);
+    }
+  }
+  // Under-canopy fluorescent strips
+  for (const lx of [-6, 0, 6]) {
+    const fl = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.12, 0.5), stripMat);
+    fl.position.set(gs.x + lx, 5.02, gs.z + 2.5);
+    g.add(fl);
+  }
+  animated.streetLampPositions.push(new THREE.Vector3(gs.x, 5.0, gs.z + 2.5));
+
+  // Small convenience kiosk behind pumps (z = gs.z - 6.5)
+  const kiosk = new THREE.Mesh(new THREE.BoxGeometry(13, 4.0, 5.5), canopyWhite);
+  kiosk.position.set(gs.x, 2.0, gs.z - 6.2);
+  kiosk.castShadow = true;
+  const kGlass = new THREE.Mesh(new THREE.BoxGeometry(9.5, 2.1, 0.2), glassMat);
+  kGlass.position.set(gs.x, 1.8, gs.z - 3.4);
+  const kTrim = new THREE.Mesh(new THREE.BoxGeometry(13.4, 0.45, 5.8), canopyRed);
+  kTrim.position.set(gs.x, 4.1, gs.z - 6.2);
+  g.add(kiosk, kGlass, kTrim);
+  collisionWorld.addRect(gs.x, gs.z - 6.2, 13.4, 5.8, 4.4, 'building', 0);
+
+  // 4 Explosive Gas Pumps!
+  for (const p of gs.pumps) {
+    const pg = new THREE.Group();
+    const base = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.24, 0.9), darkMetal);
+    base.position.y = 0.12;
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.92, 1.85, 0.65), pumpBodyMat.clone());
+    body.position.y = 1.15;
+    body.castShadow = true;
+    const screen = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.42, 0.68), hazardYellowMat);
+    screen.position.y = 1.52;
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(1.04, 0.18, 0.74), canopyWhite);
+    cap.position.y = 2.12;
+    pg.add(base, body, screen, cap);
+    pg.position.set(p.x, 0, p.z);
+    g.add(pg);
+    animated.explosives.push({
+      id: p.id,
+      kind: 'gas-pump',
+      mesh: pg,
+      bodyMat: body.material,
+      pos: pg.position,
+      radius: 0.95,
+      height: 2.2,
+      hp: 35,
+      maxHp: 35,
+      exploded: false,
+      chainTimer: 0,
+    });
+  }
+
+  // Explosive Red Fuel Barrels around Estación Sol, Puerto Cenit & Mercado Nocturno
+  for (const br of FUEL_BARREL_SPOTS) {
+    const bg = new THREE.Group();
+    const mat = barrelRedMat.clone();
+    const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 1.24, 12), mat);
+    drum.position.y = 0.62;
+    drum.castShadow = true;
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.435, 0.435, 0.16, 12), hazardYellowMat);
+    band.position.y = 0.68;
+    const rimT = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.03, 6, 12), darkMetal);
+    rimT.rotation.x = Math.PI / 2;
+    rimT.position.y = 1.22;
+    bg.add(drum, band, rimT);
+    bg.position.set(br.x, 0, br.z);
+    g.add(bg);
+    animated.explosives.push({
+      id: br.id,
+      kind: 'fuel-barrel',
+      mesh: bg,
+      bodyMat: mat,
+      pos: bg.position,
+      radius: 0.62,
+      height: 1.3,
+      hp: 20,
+      maxHp: 20,
+      exploded: false,
+      chainTimer: 0,
+    });
+  }
+
+  root.add(g);
+}
+
+// Dock 3 Sleek Drivable Speedboats (Bahia Esmeralda Marina, Paseo Pier, Río Dorado) + Parked Yellow Cala Cab on Paseo Dorado
+function buildDockedSpeedboatsAndTaxi(root, parkedVehicles) {
+  const registerVeh = (mesh, typeKey) => {
+    const spec = VEHICLES[typeKey] ?? VEHICLES.cabo_gt;
+    parkedVehicles.push({
+      mesh,
+      typeKey,
+      spec,
+      pos: mesh.position,
+      vel: new THREE.Vector3(),
+      yaw: mesh.rotation.y,
+      speed: 0,
+      vFwd: 0,
+      vy: 0,
+      grounded: true,
+      hp: spec.maxHp,
+      maxHp: spec.maxHp,
+      condition: 100,
+      nitro: 100,
+      boosting: false,
+      drifting: false,
+      inWater: Boolean(spec.isBoat),
+      engineStalled: false,
+      headlightsOn: true,
+      sirenActive: false,
+      burning: false,
+      fireCountdown: 0,
+      exploded: false,
+      smokeTimer: 0,
+      crackleTimer: 0,
+      coughTimer: 0,
+      turboLevel: 1,
+      isParked: true,
+    });
+  };
+
+  for (const spot of BOAT_DOCK_SPOTS) {
+    const boat = createVehicleMesh('speedboat');
+    boat.position.set(spot.x, 0.08, spot.z);
+    boat.rotation.y = spot.yaw;
+    root.add(boat);
+    registerVeh(boat, 'speedboat');
+  }
+
+  // Parked Yellow Cala Cab right outside Hotel Solsticio on Paseo Dorado for instant Taxi Fare side-jobs!
+  const cab = createVehicleMesh('cala_cab');
+  cab.position.set(-116, 0, 186);
+  cab.rotation.y = Math.PI / 2;
+  root.add(cab);
+  registerVeh(cab, 'cala_cab');
 }

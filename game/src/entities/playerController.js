@@ -526,8 +526,7 @@ export function poseHumanCombat(mesh, active = true) {
   const l = mesh.userData.limbs;
   if (!l) return;
   if (active) {
-    l.upperBody.rotation.y = -0.14;
-    l.upperBody.rotation.x = 0.05;
+    l.upperBody.rotation.set(0.05, -0.14, 0);
     l.armR.rotation.set(-0.94, -0.05, -0.04);
     l.forearmR.rotation.set(-0.60, 0, 0.04);
     l.armL.rotation.set(-0.84, 0.28, 0.14);
@@ -567,8 +566,7 @@ export function poseHumanStride(mesh, t, panicked = false) {
     return;
   }
   const swing = Math.sin(t) * (panicked ? 0.68 : 0.42);
-  l.upperBody.rotation.x = panicked ? 0.18 : 0.03;
-  l.upperBody.rotation.y = Math.sin(t) * (panicked ? 0.11 : 0.06);
+  l.upperBody.rotation.set(panicked ? 0.18 : 0.03, Math.sin(t) * (panicked ? 0.11 : 0.06), 0);
   l.legL.rotation.set(swing, 0, 0);
   l.legR.rotation.set(-swing, 0, 0);
   if (l.calfL) l.calfL.rotation.set(Math.max(0.06, -swing * 0.72 + 0.14), 0, 0);
@@ -586,14 +584,14 @@ export function poseHumanStride(mesh, t, panicked = false) {
   }
 }
 
-// Distinct athletic SPRINT animation: ~18-degree forward torso lean, wide stride, high knee lift & backward heel kick, fast pumping bent elbows!
+// Distinct athletic SPRINT animation: ~15-degree forward torso lean, 100% upright sideways (z=0), wide stride & pumping elbows
 export function poseHumanSprint(mesh, t) {
   const l = mesh.userData.limbs;
   if (!l) return;
   const s = Math.sin(t);
   const c = Math.cos(t);
-  // 18-degree (~0.31 rad) forward athletic lean + subtle vertical running bounce
-  l.upperBody.rotation.set(0.31 + Math.abs(c) * 0.04, s * 0.14, -s * 0.04);
+  // ~15-degree (0.26 rad) forward athletic lean, ZERO sideways lean (z = 0)!
+  l.upperBody.rotation.set(0.26 + Math.abs(c) * 0.02, s * 0.12, 0);
   l.upperBody.position.y = 0.89 + Math.abs(s) * 0.04;
 
   // Wide athletic leg stride with strong knee drive & heel kick
@@ -611,7 +609,7 @@ export function poseHumanSprint(mesh, t) {
   if (l.forearmR) l.forearmR.rotation.set(-1.18 - Math.max(0, s * 0.25), 0, 0);
 }
 
-// Exhausted ("ngos-ngosan") pose: hunched torso + heavy-breathing chest bob + sluggish stride
+// Exhausted ("ngos-ngosan") pose: slight forward breathing hunch, ZERO sideways lean (z=0)
 export function poseHumanExhausted(mesh, elapsed, moving, phase) {
   const l = mesh.userData.limbs;
   if (!l) return;
@@ -623,7 +621,8 @@ export function poseHumanExhausted(mesh, elapsed, moving, phase) {
   } else {
     poseHumanStride(mesh, 0, false);
   }
-  l.upperBody.rotation.x = 0.23 + breath * 0.055;
+  l.upperBody.rotation.x = 0.20 + breath * 0.045;
+  l.upperBody.rotation.z = 0;
   l.upperBody.position.y = 0.885 + breath * 0.024;
   if (!moving) {
     l.armL.rotation.set(-0.22 + breath * 0.06, 0, 0.14);
@@ -640,8 +639,7 @@ export function poseHumanReload(mesh, progress) {
   if (!l) return;
   const p = Math.max(0, Math.min(1, progress));
   // Tilt weapon sideways in right hand; left hand drops mag (0..0.35), grabs fresh mag (0.35..0.68), inserts & racks (0.68..1.0)
-  l.upperBody.rotation.y = -0.10;
-  l.upperBody.rotation.x = 0.08;
+  l.upperBody.rotation.set(0.08, -0.10, 0);
   l.armR.rotation.set(-0.82, -0.22, -0.34);
   l.forearmR.rotation.set(-0.62, 0.28, 0.22);
 
@@ -661,15 +659,15 @@ export function poseHumanReload(mesh, progress) {
   }
 }
 
-// Immediate directional body flinch / stagger animation when shot!
+// Subtle brief body flinch (<0.15s) when struck — ZERO sideways lean accumulation!
 export function poseHumanFlinch(mesh, frac) {
   const l = mesh.userData.limbs;
   if (!l || frac <= 0) return;
-  const f = Math.min(1, frac);
-  l.upperBody.rotation.x -= 0.36 * f;
-  l.upperBody.rotation.z += 0.18 * f;
-  l.armL.rotation.x -= 0.28 * f;
-  l.armR.rotation.x -= 0.24 * f;
+  const f = Math.max(0, Math.min(1, frac));
+  l.upperBody.rotation.x -= 0.12 * f;
+  l.upperBody.rotation.z = 0;
+  l.armL.rotation.x -= 0.14 * f;
+  l.armR.rotation.x -= 0.12 * f;
 }
 
 // Horizontal swimming & underwater diving pose with freestyle arm strokes and flutter leg kicks!
@@ -681,7 +679,7 @@ export function poseHumanSwim(mesh, elapsed, moving = true, diving = false) {
   const c = Math.cos(elapsed * freq);
   // Horizontal body pitch forward into water (steeper when diving!)
   mesh.rotation.x = diving ? 1.32 : (moving ? 1.18 : 0.72);
-  l.upperBody.rotation.set(0.16, s * 0.22, s * 0.08);
+  l.upperBody.rotation.set(0.16, s * 0.22, 0);
   l.upperBody.position.y = 0.88;
   // Alternating freestyle arm strokes
   l.armL.rotation.set(-2.35 + s * 0.78, 0.22, 0.35 + c * 0.16);
@@ -696,14 +694,14 @@ export function poseHumanSwim(mesh, elapsed, moving = true, diving = false) {
   if (l.calfR) l.calfR.rotation.set(0.24 + Math.max(0, kick * 0.5), 0, 0);
 }
 
-// Physical 3D Collapse / Fall-Down Death Animation (WASTED player, dead NPCs, enemies & police!)
-export function poseHumanCollapse(mesh, progress, side = 1) {
+// Physical 3D Collapse / Fall-Down Death Animation (ONLY when hp <= 0 / WASTED or dead NPC/enemy/police!)
+export function poseHumanCollapse(mesh, progress, side = 1, baseY = 0) {
   const p = Math.max(0, Math.min(1, progress));
   // Smooth ease-out fall
   const ease = 1 - Math.pow(1 - p, 2.4);
   mesh.rotation.x = -Math.PI * 0.5 * ease;
   mesh.rotation.z = side * 0.24 * ease;
-  mesh.position.y = 0.20 * ease;
+  mesh.position.y = baseY + 0.20 * ease;
   const l = mesh.userData.limbs;
   if (!l) return;
   l.upperBody.position.y = 0.90;
@@ -720,12 +718,12 @@ export function poseHumanCollapse(mesh, progress, side = 1) {
 }
 
 // BUSTED Surrender Animation: Dante raises both hands high & kneels on the pavement!
-export function poseHumanSurrender(mesh, progress) {
+export function poseHumanSurrender(mesh, progress, baseY = 0) {
   const p = Math.max(0, Math.min(1, progress));
   const ease = 1 - Math.pow(1 - p, 2);
   mesh.rotation.x = 0;
   mesh.rotation.z = 0;
-  mesh.position.y = -0.34 * ease;
+  mesh.position.y = baseY - 0.34 * ease;
   const l = mesh.userData.limbs;
   if (!l) return;
   l.upperBody.position.y = 0.90;
@@ -743,16 +741,31 @@ export function poseHumanSurrender(mesh, progress) {
   if (mesh.userData.muzzleFlash) mesh.userData.muzzleFlash.visible = false;
 }
 
-export function poseHumanMeleeSwing(mesh, progress, isBat = false) {
+export function poseHumanMeleeSwing(mesh, progress, isBat = false, comboIdx = 0) {
   const l = mesh.userData.limbs;
   if (!l) return;
   const swing = Math.sin(progress * Math.PI);
-  l.upperBody.rotation.y = (isBat ? -0.55 : -0.38) + swing * 0.95;
-  l.upperBody.rotation.x = 0.14;
-  l.armR.rotation.set(-1.35 + swing * 0.4, -0.6 + swing * 1.45, -0.35);
-  if (l.forearmR) l.forearmR.rotation.set(-0.35, 0, 0);
-  l.armL.rotation.set(-0.85, 0.35, 0.25);
-  if (l.forearmL) l.forearmL.rotation.set(-0.75, 0, 0);
+  if (isBat) {
+    l.upperBody.rotation.set(0.12, -0.65 + swing * 1.35, 0);
+    l.armR.rotation.set(-1.45 + swing * 0.35, -0.75 + swing * 1.75, -0.35);
+    if (l.forearmR) l.forearmR.rotation.set(-0.25, 0, 0);
+    l.armL.rotation.set(-0.95, 0.45, 0.25);
+    if (l.forearmL) l.forearmL.rotation.set(-0.65, 0, 0);
+  } else {
+    const leftHook = (comboIdx % 2) === 1;
+    l.upperBody.rotation.set(0.10, (leftHook ? 0.32 : -0.32) + (leftHook ? -swing : swing) * 0.72, 0);
+    if (leftHook) {
+      l.armL.rotation.set(-1.55 * swing - 0.55, 0.25, 0.14);
+      if (l.forearmL) l.forearmL.rotation.set(-0.25 - (1 - swing) * 0.85, 0, 0);
+      l.armR.rotation.set(-0.78, -0.18, -0.18);
+      if (l.forearmR) l.forearmR.rotation.set(-1.1, 0, 0);
+    } else {
+      l.armR.rotation.set(-1.55 * swing - 0.55, -0.25, -0.14);
+      if (l.forearmR) l.forearmR.rotation.set(-0.25 - (1 - swing) * 0.85, 0, 0);
+      l.armL.rotation.set(-0.78, 0.18, 0.18);
+      if (l.forearmL) l.forearmL.rotation.set(-1.1, 0, 0);
+    }
+  }
 }
 
 export class PlayerController {
@@ -799,8 +812,10 @@ export class PlayerController {
     this.splashTimer = 0;
     this.drownTickTimer = 0;
     this.meleeSwingTimer = 0;
+    this.meleeCombo = 0;
     this.deathState = null; // null | 'WASTED' | 'BUSTED'
     this.deathProgress = 0;
+    this.deathBaseY = 0;
     this.muzzleTimer = 0;
     this.stridePhase = 0;
     this.pantCooldown = 0;
@@ -816,11 +831,13 @@ export class PlayerController {
 
   triggerMeleeSwing() {
     this.meleeSwingTimer = 0.28;
+    this.meleeCombo = (this.meleeCombo + 1) % 2;
   }
 
   startDeathAnim(type) {
     this.deathState = type;
     this.deathProgress = 0;
+    this.deathBaseY = this.pos.y ?? 0;
     this.swimming = false;
     this.diving = false;
     this.submergeDepth = 0;
@@ -854,11 +871,9 @@ export class PlayerController {
     this.mesh.position.z = this.pos.z;
     this.mesh.rotation.y = this.yaw;
     if (this.deathState === 'WASTED') {
-      poseHumanCollapse(this.mesh, this.deathProgress, 1);
-      this.mesh.position.y = this.pos.y + 0.20 * this.deathProgress;
+      poseHumanCollapse(this.mesh, this.deathProgress, 1, this.deathBaseY);
     } else if (this.deathState === 'BUSTED') {
-      poseHumanSurrender(this.mesh, this.deathProgress);
-      this.mesh.position.y = this.pos.y - 0.34 * this.deathProgress;
+      poseHumanSurrender(this.mesh, this.deathProgress, this.deathBaseY);
     }
   }
 
@@ -981,11 +996,11 @@ export class PlayerController {
     this.vy = Math.min(7.5, 3.2 + speed * 0.14);
     this.grounded = false;
     this.knockdownTimer = Math.max(this.knockdownTimer, 1.35);
-    this.flinchTimer = 0.35;
+    this.flinchTimer = 0.12;
   }
 
   applyBulletFlinch() {
-    this.flinchTimer = Math.max(this.flinchTimer, 0.24);
+    this.flinchTimer = Math.max(this.flinchTimer, 0.12);
   }
 
   updateOnFoot(input, dt, elapsed, cameraYaw, state, audio, onDrownDamage = null) {
@@ -1155,7 +1170,7 @@ export class PlayerController {
       this.pos.z += mz * dt;
     }
 
-    const surfaceY = this.collisionWorld ? this.collisionWorld.getSurfaceY(this.pos.x, this.pos.z, this.pos.y) : 0;
+    const surfaceY = this.collisionWorld ? this.collisionWorld.getSurfaceHeight(this.pos.x, this.pos.z, this.pos.y) : 0;
     if (this.grounded && !inDeepWater && input.consumePress('Space')) {
       this.vy = 9.2;
       this.grounded = false;
@@ -1169,8 +1184,12 @@ export class PlayerController {
         this.grounded = true;
       }
     } else if (!inDeepWater) {
-      this.pos.y = THREE.MathUtils.lerp(this.pos.y, surfaceY, Math.min(1, dt * 16));
-      if (Math.abs(this.pos.y - surfaceY) < 0.05) this.pos.y = surfaceY;
+      if (surfaceY > this.pos.y) {
+        this.pos.y = surfaceY;
+      } else {
+        this.pos.y = THREE.MathUtils.lerp(this.pos.y, surfaceY, Math.min(1, dt * 20));
+        if (Math.abs(this.pos.y - surfaceY) < 0.05) this.pos.y = surfaceY;
+      }
     } else {
       this.pos.y = 0;
     }
@@ -1206,7 +1225,12 @@ export class PlayerController {
       }
     }
 
-    // Distinct Pose Priority: Deep Water Swim -> Exhausted -> Sprint -> Walk -> Idle -> Melee/Combat/Reload -> Flinch
+    // Reset torso orientation cleanly every frame so NO lean ever accumulates when alive!
+    if (this.mesh.userData.limbs?.upperBody) {
+      this.mesh.userData.limbs.upperBody.rotation.set(0, 0, 0);
+    }
+
+    // Distinct Pose Priority: Deep Water Swim -> Exhausted -> Sprint -> Walk -> Idle -> Melee/Combat/Reload -> Brief Flinch
     if (inDeepWater) {
       poseHumanSwim(this.mesh, elapsed, moving, this.diving);
     } else if (state?.exhausted) {
@@ -1222,7 +1246,7 @@ export class PlayerController {
     // Reload / Melee Swing / Combat Aim overrides upper body cleanly on land
     if (!inDeepWater) {
       if (this.meleeSwingTimer > 0) {
-        poseHumanMeleeSwing(this.mesh, 1 - this.meleeSwingTimer / 0.28, this.heldWeaponId === 'bat');
+        poseHumanMeleeSwing(this.mesh, 1 - this.meleeSwingTimer / 0.28, this.heldWeaponId === 'bat', this.meleeCombo);
       } else if (state && state.reloadTimer > 0 && state.reloadDuration > 0) {
         const prog = 1 - state.reloadTimer / state.reloadDuration;
         poseHumanReload(this.mesh, prog);
@@ -1234,7 +1258,16 @@ export class PlayerController {
     }
 
     if (this.flinchTimer > 0) {
-      poseHumanFlinch(this.mesh, this.flinchTimer / 0.24);
+      poseHumanFlinch(this.mesh, this.flinchTimer / 0.12);
+    }
+
+    // Hard guarantee: when alive on land (hp > 0), Dante NEVER leans sideways!
+    if (!inDeepWater && !this.deathState) {
+      this.mesh.rotation.x = 0;
+      this.mesh.rotation.z = 0;
+      if (this.mesh.userData.limbs?.upperBody) {
+        this.mesh.userData.limbs.upperBody.rotation.z = 0;
+      }
     }
 
     if (this.muzzleTimer > 0) {

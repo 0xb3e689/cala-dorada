@@ -54,7 +54,7 @@ export const LANDMARKS = [
   { id: 'cala-hospital', name: 'GENERAL HOSPITAL', x: -102, z: -124, district: 'distrito-torre', type: 'hospital' },
   { id: 'cdpd-precinct', name: 'CDPD PRECINCT HQ', x: 118, z: -124, district: 'distrito-torre', type: 'police' },
   { id: 'parque-dorado', name: 'PARQUE DORADO', x: -90, z: 60, district: 'distrito-torre', type: 'park' },
-  { id: 'rafas-garage', name: "RAFA'S GARAGE", x: 150, z: -242, district: 'barrio-viejo', type: 'garage' },
+  { id: 'rafas-garage', name: "RAFA'S GARAGE", x: 156, z: -242, district: 'barrio-viejo', type: 'garage' },
   { id: 'el-taller', name: 'EL TALLER ARMORY', x: -244, z: -124, district: 'mercado-nocturno', type: 'gunsmith' },
   { id: 'safehouse', name: 'ESMERALDA DOCK', x: 264, z: 182, district: 'bahia-esmeralda', type: 'marina' },
 ];
@@ -129,10 +129,10 @@ export function getRiverCenterX(z) {
     const t = (z + 180) / 345; // 0 at -180, 1 at 165
     return 146 + Math.sin(t * Math.PI) * 6 - t * 2;
   }
-  // Smooth curve between Dante's Loft (88,-264) & Rafa's Garage (158,-264) up into the northern hills
+  // Smooth curve cleanly down the 40m gorge between Dante's Loft (x=71..101) & Rafa's Garage (x=141..171) up into the northern hills!
   const t = Math.max(0, Math.min(1, (-180 - z) / 260));
-  const smooth = t * t * (3 - 2 * t);
-  return 146 - smooth * 24 + Math.sin(t * Math.PI * 1.4) * 5;
+  const bend = Math.sin(Math.min(1, t * 1.65) * Math.PI * 0.5);
+  return 146 - bend * 24;
 }
 
 export function getRiverHalfWidth(z) {
@@ -146,11 +146,57 @@ export function getRiverHalfWidth(z) {
 
 // Elevated Bridges with Hollow Passable Underpasses (kolong jembatan)
 export const RIVER_BRIDGES = [
-  { id: 'puente-del-sol', name: 'Puente del Sol', x1: 36, x2: 184, z: 200, halfZ: 12.0, deckY: 5.6, rampLen: 28, isMain: true },
-  { id: 'puente-rio-dorado', name: 'Puente Río Dorado', x1: 112, x2: 174, z: 120, halfZ: 10.5, deckY: 5.5, rampLen: 18 },
-  { id: 'puente-central', name: 'Puente Central', x1: 118, x2: 178, z: 0, halfZ: 10.5, deckY: 5.5, rampLen: 18 },
-  { id: 'puente-norte', name: 'Puente Norte', x1: 116, x2: 174, z: -180, halfZ: 10.5, deckY: 5.5, rampLen: 18 },
-  { id: 'puente-cabo', name: 'Puente del Cabo', x1: 94, x2: 154, z: -340, halfZ: 10.5, deckY: 5.4, rampLen: 16 },
+  { id: 'puente-del-sol', name: 'Puente del Sol', x1: 36, x2: 184, z: 200, halfZ: 12.0, deckY: 5.8, rampLen: 22, isMain: true },
+  { id: 'puente-rio-dorado', name: 'Puente Río Dorado', x1: 112, x2: 172, z: 120, halfZ: 10.5, deckY: 5.6, rampLen: 14 },
+  { id: 'puente-central', name: 'Puente Central', x1: 118, x2: 173, z: 0, halfZ: 10.5, deckY: 5.6, rampLen: 13 },
+  { id: 'puente-norte', name: 'Puente Norte', x1: 114, x2: 172, z: -180, halfZ: 10.5, deckY: 5.6, rampLen: 14 },
+  { id: 'puente-cabo', name: 'Puente del Cabo', x1: 96, x2: 154, z: -340, halfZ: 10.5, deckY: 5.5, rampLen: 14 },
+];
+
+// Roadside Explosive Gas Station (Estación Sol) & Red Fuel Barrel Clusters
+export const GAS_STATION = {
+  id: 'estacion-sol',
+  name: 'Estación Sol',
+  x: -210,
+  z: 162,
+  w: 24,
+  d: 16,
+  pumps: [
+    { id: 'pump-1', x: -215, z: 164 },
+    { id: 'pump-2', x: -209, z: 164 },
+    { id: 'pump-3', x: -203, z: 164 },
+    { id: 'pump-4', x: -209, z: 158 },
+  ],
+};
+
+export const FUEL_BARREL_SPOTS = [
+  { id: 'barrel-sol-1', x: -196, z: 164 },
+  { id: 'barrel-sol-2', x: -195, z: 166 },
+  { id: 'barrel-cenit-1', x: 268, z: -56 },
+  { id: 'barrel-cenit-2', x: 270.2, z: -55.5 },
+  { id: 'barrel-cenit-3', x: 269, z: -57.5 },
+  { id: 'barrel-cenit-4', x: 292, z: -108 },
+  { id: 'barrel-cenit-5', x: 293.8, z: -109.2 },
+  { id: 'barrel-mercado-1', x: -305, z: -48 },
+];
+
+// Docked Drivable Speedboats along Bahia Esmeralda Marina, Paseo Pier & Río Dorado
+export const BOAT_DOCK_SPOTS = [
+  { id: 'boat-marina', name: 'Esmeralda Marina Speedboat', x: 217, z: 282, yaw: -0.25 },
+  { id: 'boat-paseo', name: 'Paseo Pier Speedboat', x: -202, z: 278, yaw: 0.35 },
+  { id: 'boat-river', name: 'Río Dorado Speedboat', x: 146, z: 76, yaw: Math.PI },
+];
+
+// In-World Floating Pickups (Medkits, Armor Vests, Ammo Crates, Cash Stacks)
+export const WORLD_PICKUPS = [
+  { id: 'pk-hosp-med', kind: 'health', x: -96, z: -102, amount: 50 },
+  { id: 'pk-park-med', kind: 'health', x: -90, z: 76, amount: 50 },
+  { id: 'pk-pd-armor', kind: 'armor', x: 118, z: -102, amount: 50 },
+  { id: 'pk-taller-armor', kind: 'armor', x: -236, z: -124, amount: 50 },
+  { id: 'pk-mercado-ammo', kind: 'ammo', x: -310, z: -38, amount: 2 },
+  { id: 'pk-cenit-ammo', kind: 'ammo', x: 304, z: -112, amount: 2 },
+  { id: 'pk-parking-cash', kind: 'cash', x: 18, z: 58, amount: 1200 },
+  { id: 'pk-pier-cash', kind: 'cash', x: 225, z: 264, amount: 1500 },
 ];
 
 // Enterable Roofed Cover Buildings (shield player from police & HALCÓN-1 helicopter!)

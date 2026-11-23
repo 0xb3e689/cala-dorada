@@ -36,7 +36,10 @@ export class VehiclePhysics {
       nitro: 100,
       boosting: false,
       drifting: false,
-      inWater: false,
+      inWater: Boolean(spec.isBoat),
+      engineStalled: false,
+      headlightsOn: true,
+      sirenActive: false,
       burning: false,
       fireCountdown: 0,
       exploded: false,
@@ -54,6 +57,7 @@ export class VehiclePhysics {
     v.burning = false;
     v.fireCountdown = 0;
     v.exploded = false;
+    v.engineStalled = false;
     v.mesh.rotation.z = 0;
     v.mesh.rotation.x = 0;
     if (v.mesh.userData?.paintMat) {
@@ -203,10 +207,27 @@ export class VehiclePhysics {
       return;
     }
 
+    if (v.spec?.isBoat) {
+      this._updatePlayerBoat(v, input, dt, elapsed, callbacks);
+      return;
+    }
+
     const { forward, right } = input.getMoveAxes();
     const handbrake = input.isDown('Space');
     const cond = v.hp / Math.max(1, v.maxHp);
-    const canDrive = !v.burning;
+
+    // Check water depth BEFORE throttle so flooded cars stall cleanly and let player bail out into swimming mode!
+    const waterDepth = this.collisionWorld ? this.collisionWorld.getWaterDepth(v.pos.x, v.pos.z, v.pos.y) : 0;
+    v.inWater = waterDepth > 0.05;
+    if (waterDepth >= 1.05 && !v.engineStalled) {
+      v.engineStalled = true;
+      if (callbacks.audio) callbacks.audio.playWaterSplash(1.0);
+      if (callbacks.onEngineStalled) callbacks.onEngineStalled(v);
+    } else if (waterDepth < 0.65 && v.engineStalled) {
+      v.engineStalled = false;
+    }
+
+    const canDrive = !v.burning && !v.engineStalled;
     const boost = canDrive && (input.isDown('ShiftLeft') || input.isDown('ShiftRight')) && v.nitro > 4 && forward > 0;
     v.boosting = boost;
 
@@ -249,23 +270,17 @@ export class VehiclePhysics {
     } else if (forward < 0 && canDrive) {
       vFwd -= (vFwd > 1.5 ? spec.brake : spec.accel * 0.56) * dt;
     } else {
-      vFwd *= Math.pow(v.burning ? 0.18 : 0.46, dt);
+      vFwd *= Math.pow(v.engineStalled ? 0.06 : v.burning ? 0.18 : 0.46, dt);
     }
 
     if (handbrake) {
       vFwd *= Math.pow(0.54, dt);
     }
 
-    // Natural water depth drag (respecting elevated bridge deck height!)
-    const waterDepth = this.collisionWorld ? this.collisionWorld.getWaterDepth(v.pos.x, v.pos.z, v.pos.y) : 0;
-    v.inWater = waterDepth > 0.05;
+    // Natural water depth drag
     if (waterDepth > 0.05) {
-      vFwd *= Math.pow(waterDepth > 0.9 ? 0.12 : 0.38, dt);
-      if (waterDepth > 1.0 && this.collisionWorld) {
-        const ret = this.collisionWorld.getShoreReturnVector(v.pos.x, v.pos.z);
-        v.vel.x += ret.x * 9.0 * dt;
-        v.vel.z += ret.z * 9.0 * dt;
-      }
+      vFwd *= Math.pow(waterDepth > 0.9 ? 0.08 : 0.38, dt);
+      vLat *= Math.pow(0.2, dt);
     }
 
     vFwd = Math.max(-spec.maxSpeed * 0.34, Math.min(maxSpd, vFwd));
@@ -275,7 +290,9 @@ export class VehiclePhysics {
     const highSpeedStability = 1.0 - 0.42 * Math.min(1, Math.abs(vFwd) / Math.max(1, spec.maxSpeed));
     const steerDir = vFwd >= -0.4 ? 1 : -1;
     const turnMul = handbrake ? 1.46 : 1.0;
-    v.yaw -= right * spec.turnRate * turnMul * lowSpeedRamp * highSpeedStability * steerDir * dt;
+    if (!v.engineStalled) {
+      v.yaw -= right * spec.turnRate * turnMul * lowSpeedRamp * highSpeedStability * steerDir * dt;
+    }
 
     // Clean arcade drift slip angle on handbrake or high-speed cornering
     const grip = handbrake ? 0.52 : spec.driftGrip;
@@ -292,11 +309,12 @@ export class VehiclePhysics {
     v.vFwd = vFwd;
 
     // Solid sub-stepped building, bridge rail, seawall & prop collision resolution
-    const radius = Math.max(spec.width * 0.62, spec.length * 0.38);
+    const radius = Math.max(spec.width * 0.58, spec.length * 0.36);
     if (this.collisionWorld) {
       const hit = this.collisionWorld.moveAndSlide(v.pos, v.vel, radius, dt, {
         bounce: 0.22,
         tangentDamp: 0.14,
+        entityHeight: spec.height ?? 1.5,
       });
       if (hit.hit && hit.impactSpeed > 6.5) {
         const contactPt = v.pos.clone().add(new THREE.Vector3(-hit.normalX * radius, 0.85, -hit.normalZ * radius));
@@ -315,11 +333,17 @@ export class VehiclePhysics {
 
     v.speed = Math.hypot(v.vel.x, v.vel.z);
 
-    // Vertical elevation: smoothly ride up & over elevated bridges, OR drive underneath along embankments!
-    const surfaceY = this.collisionWorld ? this.collisionWorld.getSurfaceY(v.pos.x, v.pos.z, v.pos.y) : 0;
+    // Vertical elevation: smoothly ride up & over elevated bridges, OR drive underneath along embankments, OR sink slightly if flooded!
+    const rawSurfaceY = this.collisionWorld ? this.collisionWorld.getSurfaceHeight(v.pos.x, v.pos.z, v.pos.y) : 0;
+    const surfaceY = v.engineStalled ? -0.32 : rawSurfaceY;
     if (v.grounded) {
-      v.pos.y = THREE.MathUtils.lerp(v.pos.y, surfaceY, Math.min(1, dt * 16));
-      if (Math.abs(v.pos.y - surfaceY) < 0.06) v.pos.y = surfaceY;
+      if (surfaceY > v.pos.y) {
+        // Immediate climb lock on ramps so high-speed cars NEVER lag behind bridge elevation!
+        v.pos.y = surfaceY;
+      } else {
+        v.pos.y = THREE.MathUtils.lerp(v.pos.y, surfaceY, Math.min(1, dt * 22));
+        if (Math.abs(v.pos.y - surfaceY) < 0.05) v.pos.y = surfaceY;
+      }
     } else {
       v.vy -= WORLD.gravity * dt;
       v.pos.y += v.vy * dt;
@@ -334,9 +358,9 @@ export class VehiclePhysics {
     v.mesh.position.copy(v.pos);
     v.mesh.rotation.y = v.yaw;
     let rampPitch = 0;
-    if (this.collisionWorld && surfaceY > 0.05) {
-      const aheadY = this.collisionWorld.getSurfaceY(v.pos.x + nFwdX * 2.2, v.pos.z + nFwdZ * 2.2, v.pos.y);
-      const behindY = this.collisionWorld.getSurfaceY(v.pos.x - nFwdX * 2.2, v.pos.z - nFwdZ * 2.2, v.pos.y);
+    if (this.collisionWorld && rawSurfaceY > 0.02) {
+      const aheadY = this.collisionWorld.getSurfaceHeight(v.pos.x + nFwdX * 2.2, v.pos.z + nFwdZ * 2.2, v.pos.y);
+      const behindY = this.collisionWorld.getSurfaceHeight(v.pos.x - nFwdX * 2.2, v.pos.z - nFwdZ * 2.2, v.pos.y);
       rampPitch = -Math.atan2(aheadY - behindY, 4.4);
     }
     const targetRoll = right * Math.min(0.085, v.speed * 0.0022) * (handbrake ? 1.3 : 1.0);
@@ -354,6 +378,286 @@ export class VehiclePhysics {
     if ((v.drifting || boost) && Math.random() < 0.65) {
       const rearPos = v.pos.clone().add(new THREE.Vector3(-nFwdX * 2.2, 0.35, -nFwdZ * 2.2));
       this.spawnSmoke(rearPos, boost ? 0xff9238 : 0xe8ecf5, boost ? 0.62 : 0.88, 0.55);
+    }
+  }
+
+  _updatePlayerBoat(v, input, dt, elapsed, callbacks = {}) {
+    const { forward, right } = input.getMoveAxes();
+    const spec = v.spec;
+    const boost = !v.burning && (input.isDown('ShiftLeft') || input.isDown('ShiftRight')) && v.nitro > 4 && forward > 0;
+    v.boosting = boost;
+    if (boost) v.nitro = Math.max(0, v.nitro - dt * 20);
+    else v.nitro = Math.min(100, v.nitro + dt * 10);
+
+    const maxSpd = boost ? spec.maxSpeed * 1.18 : spec.maxSpeed;
+    const fwdX = Math.sin(v.yaw);
+    const fwdZ = Math.cos(v.yaw);
+    const rightX = Math.cos(v.yaw);
+    const rightZ = -Math.sin(v.yaw);
+
+    let vFwd = v.vel.x * fwdX + v.vel.z * fwdZ;
+    let vLat = v.vel.x * rightX + v.vel.z * rightZ;
+
+    if (forward > 0 && !v.burning) {
+      vFwd += (boost ? spec.accel * 1.45 : spec.accel) * dt;
+    } else if (forward < 0 && !v.burning) {
+      vFwd -= spec.brake * dt;
+    } else {
+      vFwd *= Math.pow(0.42, dt);
+    }
+    vFwd = Math.max(-spec.maxSpeed * 0.32, Math.min(maxSpd, vFwd));
+
+    const turnAmt = Math.max(0.35, Math.min(1, Math.abs(vFwd) / 5.5));
+    const steerDir = vFwd >= -0.3 ? 1 : -1;
+    v.yaw -= right * spec.turnRate * turnAmt * steerDir * dt;
+    vLat *= Math.pow(0.18, dt * 4.0);
+
+    const nFwdX = Math.sin(v.yaw);
+    const nFwdZ = Math.cos(v.yaw);
+    const nRightX = Math.cos(v.yaw);
+    const nRightZ = -Math.sin(v.yaw);
+    v.vel.x = nFwdX * vFwd + nRightX * vLat;
+    v.vel.z = nFwdZ * vFwd + nRightZ * vLat;
+    v.vFwd = vFwd;
+
+    const prevX = v.pos.x;
+    const prevZ = v.pos.z;
+    // Sub-step move while staying under bridges (followSurface: false so boat ALWAYS stays on water underneath bridges!)
+    if (this.collisionWorld) {
+      v.pos.y = 0.08;
+      this.collisionWorld.moveAndSlide(v.pos, v.vel, 1.55, dt, {
+        bounce: 0.25,
+        entityHeight: 1.45,
+        followSurface: false,
+      });
+      // Keep boat within navigable water (ocean, Marina Bay, Río Dorado — cleanly passing underneath all bridges!)
+      const nextDepth = this.collisionWorld.getWaterDepth(v.pos.x, v.pos.z, 0);
+      if (nextDepth < 0.14) {
+        // Test sliding along X or Z independently along shoreline/riverbank
+        const tryXDepth = this.collisionWorld.getWaterDepth(v.pos.x, prevZ, 0);
+        const tryZDepth = this.collisionWorld.getWaterDepth(prevX, v.pos.z, 0);
+        if (tryXDepth >= 0.14) {
+          v.pos.z = prevZ;
+          v.vel.z *= -0.25;
+        } else if (tryZDepth >= 0.14) {
+          v.pos.x = prevX;
+          v.vel.x *= -0.25;
+        } else {
+          v.pos.x = prevX;
+          v.pos.z = prevZ;
+          v.vel.multiplyScalar(-0.2);
+        }
+      }
+      // Keep within coastal ocean play area
+      if (v.pos.z > 395) { v.pos.z = 395; v.vel.z = Math.min(0, v.vel.z); }
+      if (v.pos.x < -445) { v.pos.x = -445; v.vel.x = Math.max(0, v.vel.x); }
+      if (v.pos.x > 450) { v.pos.x = 450; v.vel.x = Math.min(0, v.vel.x); }
+    } else {
+      v.pos.x += v.vel.x * dt;
+      v.pos.z += v.vel.z * dt;
+    }
+
+    v.inWater = true;
+    v.speed = Math.hypot(v.vel.x, v.vel.z);
+    v.pos.y = 0.08 + Math.sin(elapsed * 3.1 + v.pos.x * 0.08) * 0.06;
+    v.mesh.position.copy(v.pos);
+    v.mesh.rotation.y = v.yaw;
+    const targetPitch = -Math.min(0.16, Math.max(-0.06, vFwd * 0.0055));
+    const targetRoll = -right * Math.min(0.22, v.speed * 0.008);
+    v.mesh.rotation.x = THREE.MathUtils.lerp(v.mesh.rotation.x, targetPitch, Math.min(1, dt * 6));
+    v.mesh.rotation.z = THREE.MathUtils.lerp(v.mesh.rotation.z, targetRoll, Math.min(1, dt * 6));
+
+    // Frothy white water wake spray behind the stern!
+    if (v.speed > 3.0 && Math.random() < 0.72) {
+      const sternL = v.pos.clone().add(new THREE.Vector3(-nFwdX * 3.0 - nRightX * 0.7, 0.18, -nFwdZ * 3.0 - nRightZ * 0.7));
+      const sternR = v.pos.clone().add(new THREE.Vector3(-nFwdX * 3.0 + nRightX * 0.7, 0.18, -nFwdZ * 3.0 + nRightZ * 0.7));
+      this.spawnSmoke(sternL, 0xe8fbff, 0.55 + v.speed * 0.015, 0.55);
+      this.spawnSmoke(sternR, 0xd8f6ff, 0.55 + v.speed * 0.015, 0.55);
+    }
+  }
+
+  // Genuine Solid Vehicle-vs-Vehicle Collision Detection & Impulse Response across ALL active vehicles!
+  // Uses oriented 2-circle capsule separation (front + rear bumper spheres), realistic momentum transfer,
+  // off-center yaw spin, metallic crunch SFX, bright impact sparks & speed-proportional hull damage!
+  resolveVehicleCollisions(allVehicles, dt, callbacks = {}) {
+    const n = allVehicles.length;
+    if (n < 2) return;
+
+    const getMass = (v) => {
+      if (v.spec?.isSwat) return 3.4;
+      if (v.typeKey === 'baja_runner') return 1.8;
+      if (v.spec?.isBoat) return 1.5;
+      if (v.typeKey === 'scooter') return 0.45;
+      if (v.spec?.isPolice) return 1.45;
+      return 1.25;
+    };
+
+    const getVel = (v) => {
+      if (v.vel && (v.vel.lengthSq() > 1e-4 || !v.isTraffic)) {
+        return { x: v.vel.x, z: v.vel.z };
+      }
+      if (v.isTraffic) {
+        const spd = v.curSpeed ?? 0;
+        return {
+          x: v.axis === 'x' ? v.dir * spd : 0,
+          z: v.axis === 'z' ? v.dir * spd : 0,
+        };
+      }
+      return { x: 0, z: 0 };
+    };
+
+    const getCircles = (v) => {
+      const w = v.spec?.width ?? 2.1;
+      const l = v.spec?.length ?? 4.6;
+      const r = Math.max(0.55, w * 0.50);
+      const off = Math.max(0.2, l * 0.5 - r * 0.92);
+      const yaw = v.yaw ?? v.mesh?.rotation?.y ?? 0;
+      const fx = Math.sin(yaw) * off;
+      const fz = Math.cos(yaw) * off;
+      const px = v.pos.x;
+      const pz = v.pos.z;
+      return [
+        { x: px + fx, z: pz + fz, r, end: 1 },
+        { x: px - fx, z: pz - fz, r, end: -1 },
+      ];
+    };
+
+    for (let i = 0; i < n; i++) {
+      const a = allVehicles[i];
+      if (!a || !a.pos) continue;
+      const aCircles = getCircles(a);
+      const aMass = getMass(a);
+
+      for (let j = i + 1; j < n; j++) {
+        const b = allVehicles[j];
+        if (!b || !b.pos) continue;
+
+        // Vertical separation check so cars driving OVER a bridge never collide with cars/boats UNDERNEATH!
+        if (Math.abs((a.pos.y ?? 0) - (b.pos.y ?? 0)) > 2.2) continue;
+
+        // Quick broad-phase reject
+        const bdx = b.pos.x - a.pos.x;
+        const bdz = b.pos.z - a.pos.z;
+        if (bdx * bdx + bdz * bdz > 64) continue;
+
+        const bCircles = getCircles(b);
+        let bestPen = 0;
+        let bestNx = 0;
+        let bestNz = 0;
+        let bestContactX = 0;
+        let bestContactZ = 0;
+        let hitEndA = 0;
+        let hitEndB = 0;
+
+        for (let ci = 0; ci < 2; ci++) {
+          const ca = aCircles[ci];
+          for (let cj = 0; cj < 2; cj++) {
+            const cb = bCircles[cj];
+            const dx = cb.x - ca.x;
+            const dz = cb.z - ca.z;
+            const minD = ca.r + cb.r;
+            const d2 = dx * dx + dz * dz;
+            if (d2 < minD * minD) {
+              const d = Math.sqrt(d2) || 0.001;
+              const pen = minD - d;
+              if (pen > bestPen) {
+                bestPen = pen;
+                bestNx = dx / d; // points from A to B
+                bestNz = dz / d;
+                bestContactX = ca.x + bestNx * ca.r;
+                bestContactZ = ca.z + bestNz * ca.r;
+                hitEndA = ca.end;
+                hitEndB = cb.end;
+              }
+            }
+          }
+        }
+
+        if (bestPen <= 0.001) continue;
+
+        const bMass = getMass(b);
+        const invA = 1 / aMass;
+        const invB = 1 / bMass;
+        const invSum = invA + invB;
+
+        // Positional separation so vehicles NEVER phase through each other!
+        const sepA = bestPen * (invA / invSum);
+        const sepB = bestPen * (invB / invSum);
+        a.pos.x -= bestNx * sepA;
+        a.pos.z -= bestNz * sepA;
+        b.pos.x += bestNx * sepB;
+        b.pos.z += bestNz * sepB;
+        if (a.mesh && a.mesh.position !== a.pos) a.mesh.position.copy(a.pos);
+        if (b.mesh && b.mesh.position !== b.pos) b.mesh.position.copy(b.pos);
+
+        // Relative velocity along collision normal (A -> B)
+        const va = getVel(a);
+        const vb = getVel(b);
+        const rvx = vb.x - va.x;
+        const rvz = vb.z - va.z;
+        const velAlongNormal = rvx * bestNx + rvz * bestNz;
+
+        if (velAlongNormal < 0) {
+          const impactSpeed = -velAlongNormal;
+          const restitution = 0.34;
+          const impulse = (-(1 + restitution) * velAlongNormal) / invSum;
+
+          const impAx = -bestNx * impulse * invA;
+          const impAz = -bestNz * impulse * invA;
+          const impBx = bestNx * impulse * invB;
+          const impBz = bestNz * impulse * invB;
+
+          const applyKnock = (veh, kx, kz, endSign) => {
+            if (!veh.vel) veh.vel = new THREE.Vector3();
+            veh.vel.x += kx;
+            veh.vel.z += kz;
+            // Realistic yaw spin impulse when struck near front or rear bumper
+            const yaw = veh.yaw ?? 0;
+            const rtX = Math.cos(yaw);
+            const rtZ = -Math.sin(yaw);
+            const sideTorque = (kx * rtX + kz * rtZ) * endSign;
+            const spinDelta = Math.max(-0.55, Math.min(0.55, sideTorque * 0.022));
+            if (veh.isTraffic) {
+              veh.knockVel = veh.knockVel ?? new THREE.Vector3();
+              veh.knockVel.x += kx * 1.15;
+              veh.knockVel.z += kz * 1.15;
+              veh.yawSpin = (veh.yawSpin ?? 0) + spinDelta * 6.0;
+              veh.displacedTimer = Math.max(veh.displacedTimer ?? 0, Math.min(3.5, 0.8 + impactSpeed * 0.08));
+              veh.curSpeed = Math.max(0, (veh.curSpeed ?? 0) * 0.35);
+            } else if (veh.isParked) {
+              veh.knockVel = veh.knockVel ?? new THREE.Vector3();
+              veh.knockVel.x += kx * 1.1;
+              veh.knockVel.z += kz * 1.1;
+              veh.yawSpin = (veh.yawSpin ?? 0) + spinDelta * 5.0;
+            } else {
+              veh.yaw = (veh.yaw ?? 0) + spinDelta;
+              veh.speed = Math.hypot(veh.vel.x, veh.vel.z);
+              if (veh.mesh) veh.mesh.rotation.y = veh.yaw;
+            }
+          };
+
+          applyKnock(a, impAx, impAz, hitEndA);
+          applyKnock(b, impBx, impBz, hitEndB);
+
+          // Collision sparks, metallic crunch SFX, damage & wanted heat!
+          if (impactSpeed > 4.2) {
+            const contactPt = new THREE.Vector3(bestContactX, (a.pos.y ?? 0) + 0.85, bestContactZ);
+            this.spawnCollisionSparks(contactPt, bestNx, bestNz, Math.min(18, Math.round(impactSpeed * 0.55)));
+            if (callbacks.audio) callbacks.audio.playCrash(impactSpeed);
+
+            if (impactSpeed > 6.5) {
+              const baseDmg = (impactSpeed - 5.0) * 1.25;
+              // Heavier vehicle deals more damage to lighter vehicle
+              this.applyDamage(a, baseDmg * Math.min(1.8, bMass / aMass), callbacks);
+              this.applyDamage(b, baseDmg * Math.min(1.8, aMass / bMass), callbacks);
+            }
+
+            if (callbacks.onVehicleCollide) {
+              callbacks.onVehicleCollide(a, b, impactSpeed, contactPt);
+            }
+          }
+        }
+      }
     }
   }
 

@@ -45,6 +45,9 @@ export function createVehicleMesh(typeKey, overrideColor = null) {
   if (typeKey === 'scooter') {
     return buildScooter(g, bodyColor, spec.accent);
   }
+  if (typeKey === 'speedboat' || spec.isBoat) {
+    return buildSpeedboat(g, bodyColor, spec.accent);
+  }
 
   const paintMat = new THREE.MeshStandardMaterial({
     color: bodyColor, roughness: 0.2, metalness: 0.68,
@@ -276,6 +279,7 @@ export function createVehicleMesh(typeKey, overrideColor = null) {
   // Crisp focused LED Headlights + Tight Additive Flare Sprites & Full-Width Taillight Bar
   const headMat = new THREE.MeshBasicMaterial({ color: 0xfff8de });
   const tailMat = new THREE.MeshBasicMaterial({ color: 0xff2442 });
+  const headlightParts = [];
   for (const sx of [-W * 0.35, W * 0.35]) {
     const hl = new THREE.Mesh(new THREE.BoxGeometry(isSuper ? 0.54 : 0.44, 0.15, 0.12), headMat);
     hl.position.set(sx, isSuper ? 0.64 : 0.72, L / 2 + 0.06);
@@ -284,6 +288,7 @@ export function createVehicleMesh(typeKey, overrideColor = null) {
     const tl = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.16, 0.12), tailMat);
     tl.position.set(sx, 0.74, -L / 2 - 0.06);
     g.add(hl, hlFlare, tl);
+    headlightParts.push(hlFlare);
   }
   if (isSuper) {
     const tailStrip = new THREE.Mesh(new THREE.BoxGeometry(W * 0.88, 0.08, 0.1), tailMat);
@@ -300,6 +305,29 @@ export function createVehicleMesh(typeKey, overrideColor = null) {
     beam.rotation.x = -Math.PI / 2;
     beam.position.set(sx, 0.48, L / 2 + 1.85);
     g.add(beam);
+    headlightParts.push(beam);
+  }
+
+  // Taxi Roof Beacon & Checkered Side Accent for Cala Cab
+  if (spec.isTaxi) {
+    const barY = cabY + cabH * 0.5 + 0.12;
+    const taxiSign = new THREE.Mesh(
+      new THREE.BoxGeometry(0.95, 0.28, 0.36),
+      new THREE.MeshBasicMaterial({ color: 0xffe46b })
+    );
+    taxiSign.position.set(0, barY, cabZ + 0.05);
+    const taxiCap = new THREE.Mesh(new THREE.BoxGeometry(0.98, 0.06, 0.38), darkMat);
+    taxiCap.position.set(0, barY - 0.14, cabZ + 0.05);
+    g.add(taxiSign, taxiCap);
+    // Iconic black/white checkered side stripes
+    for (let k = -4; k <= 4; k++) {
+      const sq = new THREE.Mesh(
+        new THREE.BoxGeometry(W + 0.05, 0.12, 0.24),
+        k % 2 === 0 ? darkMat : chromeMat
+      );
+      sq.position.set(0, 0.68, k * 0.32);
+      g.add(sq);
+    }
   }
 
   // Wheels with deep metallic rims & red brake calipers (on supercar)
@@ -402,6 +430,7 @@ export function createVehicleMesh(typeKey, overrideColor = null) {
 
   g.userData = {
     typeKey, spec, wheels, lightbar, paintMat, rimMat, nitroFlames,
+    headMat, headlightParts,
     spoilerGt, spoilerDucktail, underglowGroup, underglowMat,
     chassis, noseMesh, bumperF, bumperR,
     baseNoseRotX: noseMesh ? noseMesh.rotation.x : 0,
@@ -410,6 +439,17 @@ export function createVehicleMesh(typeKey, overrideColor = null) {
     hoodFireGroup, hoodFireParts: [f1, f2, f3], hoodFireLight,
   };
   return g;
+}
+
+export function setVehicleHeadlights(vehicle, on) {
+  const ud = vehicle?.mesh?.userData;
+  if (!ud) return;
+  if (ud.headlightParts) {
+    for (const part of ud.headlightParts) part.visible = Boolean(on);
+  }
+  if (ud.headMat) {
+    ud.headMat.color.setHex(on ? 0xfff8de : 0x3b4252);
+  }
 }
 
 export function updateVehicleDamageVisuals(v, elapsed) {
@@ -525,7 +565,84 @@ function buildScooter(g, bodyColor, accentColor) {
     g.add(w);
     wheels.push(w);
   }
-  g.userData = { typeKey: 'scooter', spec: VEHICLES.scooter, wheels, lightbar: null, paintMat: paint };
+  g.userData = { typeKey: 'scooter', spec: VEHICLES.scooter, wheels, lightbar: null, paintMat: paint, headlightParts: [] };
+  return g;
+}
+
+function buildSpeedboat(g, bodyColor, accentColor) {
+  const hullMat = new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.22, metalness: 0.35 });
+  const accentMat = new THREE.MeshStandardMaterial({ color: accentColor ?? 0x1ec8b8, roughness: 0.28, metalness: 0.45 });
+  const deckMat = new THREE.MeshStandardMaterial({ color: 0xc2935e, roughness: 0.72 });
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x171d28, roughness: 0.55, metalness: 0.45 });
+  const glassMat = new THREE.MeshStandardMaterial({ color: 0x1a4864, roughness: 0.08, metalness: 0.9, transparent: true, opacity: 0.85 });
+  const chromeMat = new THREE.MeshStandardMaterial({ color: 0xe6eef8, roughness: 0.16, metalness: 0.92 });
+
+  // Main sleek V-hull & tapered pointed bow
+  const hullMain = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.82, 4.4), hullMat);
+  hullMain.position.set(0, 0.38, -0.5);
+  hullMain.castShadow = true;
+  const bow = new THREE.Mesh(new THREE.ConeGeometry(1.55, 2.5, 4), hullMat);
+  bow.rotation.x = Math.PI / 2;
+  bow.rotation.y = Math.PI / 4;
+  bow.scale.set(1.04, 1.0, 0.38);
+  bow.position.set(0, 0.42, 2.85);
+  bow.castShadow = true;
+  // Teal racing side stripe
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.38, 0.18, 4.35), accentMat);
+  stripe.position.set(0, 0.56, -0.45);
+  // Marine teak foredeck & cockpit floor
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(2.05, 0.12, 3.9), deckMat);
+  deck.position.set(0, 0.78, -0.4);
+  // Wraparound tinted sport windshield
+  const windF = new THREE.Mesh(new THREE.BoxGeometry(1.92, 0.52, 0.1), glassMat);
+  windF.position.set(0, 1.05, 0.82);
+  windF.rotation.x = -0.52;
+  for (const sx of [-0.94, 0.94]) {
+    const windS = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.44, 0.95), glassMat);
+    windS.position.set(sx, 1.0, 0.36);
+    g.add(windS);
+  }
+  // Twin leather marine bucket seats + steering console
+  const seatMat = new THREE.MeshStandardMaterial({ color: 0xf4eee0, roughness: 0.65 });
+  for (const sx of [-0.46, 0.46]) {
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.52, 0.52), seatMat);
+    seat.position.set(sx, 0.98, -0.45);
+    g.add(seat);
+  }
+  const bench = new THREE.Mesh(new THREE.BoxGeometry(1.72, 0.46, 0.62), seatMat);
+  bench.position.set(0, 0.96, -1.65);
+  const consoleM = new THREE.Mesh(new THREE.BoxGeometry(1.75, 0.36, 0.52), darkMat);
+  consoleM.position.set(0, 0.96, 0.45);
+  // Twin outboard engine cowling at stern
+  const motor = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.88, 0.72), darkMat);
+  motor.position.set(0, 0.68, -2.95);
+  const motorTrim = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.12, 0.65), accentMat);
+  motorTrim.position.set(0, 0.98, -2.95);
+  // Bow headlight & red/green port-starboard nav lights
+  const headMat = new THREE.MeshBasicMaterial({ color: 0xfff8de });
+  const bowLight = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), headMat);
+  bowLight.position.set(0, 0.82, 2.25);
+  const bowFlare = makeFlareSprite('#ffffff', 'rgba(255,235,175,0.75)', 1.2, 0.8);
+  bowFlare.position.set(0, 0.85, 2.45);
+  const portL = new THREE.Mesh(new THREE.SphereGeometry(0.08, 6, 6), new THREE.MeshBasicMaterial({ color: 0xff3b5c }));
+  portL.position.set(-1.12, 0.82, 0.85);
+  const stbdL = new THREE.Mesh(new THREE.SphereGeometry(0.08, 6, 6), new THREE.MeshBasicMaterial({ color: 0x42e38c }));
+  stbdL.position.set(1.12, 0.82, 0.85);
+  // Chrome bow rail
+  const rail = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.06, 0.06), chromeMat);
+  rail.position.set(0, 1.0, 1.85);
+
+  g.add(hullMain, bow, stripe, deck, windF, bench, consoleM, motor, motorTrim, bowLight, bowFlare, portL, stbdL, rail);
+  g.userData = {
+    typeKey: 'speedboat',
+    spec: VEHICLES.speedboat,
+    wheels: [],
+    lightbar: null,
+    paintMat: hullMat,
+    headMat,
+    headlightParts: [bowFlare],
+    baseColorHex: bodyColor,
+  };
   return g;
 }
 

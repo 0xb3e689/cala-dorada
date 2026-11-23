@@ -1,10 +1,30 @@
 // Street races, Golden Shell collectibles, 8 city properties, plus 5 interactive systems: Car Modding, Character Wardrobe, Fishing, Gardening, and Barrio Viejo Roof Tile Repair.
 
 import * as THREE from '../../vendor/three.module.min.js';
-import { STREET_RACES, GOLDEN_SHELLS, FISHING_SPOTS, GARDEN_SITES, ROOF_REPAIR_SITES } from '../world/cityPlan.js';
-import { WEAPONS, PROPERTIES, FISH_SPECIES, GARDEN_CROPS } from '../core/config.js';
+import { STREET_RACES, GOLDEN_SHELLS, FISHING_SPOTS, GARDEN_SITES, ROOF_REPAIR_SITES, PUBLIC_FACILITIES } from '../world/cityPlan.js';
+import { WEAPONS, PROPERTIES, FISH_SPECIES, GARDEN_CROPS, CAR_PAINTS } from '../core/config.js';
 import { getEmpireIncomePerHour } from '../core/gameState.js';
 import { createVehicleMesh, applyVehicleMods } from '../entities/vehicleFactory.js';
+import { buildCharacterMesh } from '../entities/playerController.js';
+
+const TAXI_DESTINATIONS = [
+  { name: 'Hotel Solsticio', x: -120, z: 194 },
+  { name: 'General Hospital', x: -102, z: -96 },
+  { name: 'Parque Dorado', x: -90, z: 112 },
+  { name: 'Mirador Plaza', x: 18, z: -12 },
+  { name: 'Mercado Nocturno', x: -310, z: -4 },
+  { name: 'Esmeralda Marina', x: 245, z: 194 },
+  { name: "Rafa's Garage", x: 150, z: -206 },
+  { name: 'CDPD Precinct', x: 108, z: -96 },
+];
+
+const VIGILANTE_SPAWNS = [
+  { name: 'Puerto Cenit Smuggler', x: 268, z: -22 },
+  { name: 'Mercado Syndicate Hitman', x: -292, z: -6 },
+  { name: 'Paseo Street Hijacker', x: -225, z: 194 },
+  { name: 'Torre Vault Runner', x: 18, z: -168 },
+  { name: 'Barrio Viejo Fugitive', x: 204, z: -194 },
+];
 
 export class ActivitiesAndShops {
   constructor(scene) {
@@ -17,9 +37,11 @@ export class ActivitiesAndShops {
     this.nearbyRoof = null;
     this.spawnedPerkCars = new Map();
 
-    // Active mini-game states
-    this.fishingSession = null; // { spot, phase: 'wait'|'bite'|'reel', timer, targetFish, cursor, dir, zoneStart, zoneEnd, progress }
-    this.roofSession = null;    // { site, cursor, dir, zoneStart, zoneEnd, repairedCount }
+    // Active mini-game & GTA side-job states
+    this.fishingSession = null;
+    this.roofSession = null;
+    this.taxiJob = null;      // { phase: 'pickup'|'dropoff', target, destName, timer, faresDone, farePay, passengerMesh }
+    this.vigilanteJob = null; // { level, targetEnemy, targetName, timer, bounty }
     this.lastGardenSyncKey = '';
     this.lastRoofSyncKey = '';
 
@@ -30,6 +52,16 @@ export class ActivitiesAndShops {
     this.cpRing.position.y = 5.5;
     this.cpRing.visible = false;
     this.scene.add(this.cpRing);
+
+    // Side-job 3D beacon (Taxi teal / Vigilante crimson)
+    this.jobBeacon = new THREE.Mesh(
+      new THREE.RingGeometry(2.6, 3.6, 28),
+      new THREE.MeshBasicMaterial({ color: 0x34e0c8, side: THREE.DoubleSide, transparent: true, opacity: 0.85 })
+    );
+    this.jobBeacon.rotation.x = -Math.PI / 2;
+    this.jobBeacon.position.y = 0.22;
+    this.jobBeacon.visible = false;
+    this.scene.add(this.jobBeacon);
   }
 
   syncOwnedPropertyVehicles(state) {
@@ -253,19 +285,245 @@ export class ActivitiesAndShops {
     }
   }
 
-  getPromptText(state) {
+  // Classic Pay 'n' Spray at Rafa's Garage: repairs vehicle to 100%, applies fresh paint color, clears ALL wanted stars!
+  triggerPayNSpray(state, playerVehicle, police, vehiclePhysics, saveManager, audio) {
+    if (!playerVehicle) return false;
+    const cost = state.cash >= 500 ? 500 : 0;
+    state.cash = Math.max(0, state.cash - cost);
+    const curPaint = state.carMods?.paint;
+    const otherPaints = CAR_PAINTS.filter((p) => p.hex !== curPaint);
+    const chosen = otherPaints[Math.floor(Math.random() * otherPaints.length)] ?? CAR_PAINTS[0];
+    if (playerVehicle.typeKey === 'apex_gt' && state.carMods) {
+      state.carMods.paint = chosen.hex;
+    }
+    if (vehiclePhysics) {
+      vehiclePhysics.repairVehicle(playerVehicle, chosen.hex);
+    } else {
+      playerVehicle.hp = playerVehicle.maxHp;
+      playerVehicle.condition = 100;
+      playerVehicle.nitro = 100;
+      playerVehicle.burning = false;
+      playerVehicle.exploded = false;
+      if (playerVehicle.mesh?.userData?.paintMat) {
+        playerVehicle.mesh.userData.paintMat.color.set(chosen.hex);
+      }
+    }
+    if (police) police.dropStars(state, 5);
+    if (audio && audio.playSprayPaint) audio.playSprayPaint();
+    else if (audio) audio.playUiBeep(840);
+    if (saveManager) saveManager.saveSlot(state.activeSlot, state);
+    state.toast = { text: `PAY 'N' SPRAY (${chosen.name.toUpperCase()}) · HEAT CLEARED`, timer: 3.4 };
+    return true;
+  }
+
+  // Classic GTA Taxi Fares side-job [T] while driving a Cala Cab!
+  toggleTaxiJob(state, playerPos, playerVehicle, audio) {
+    if (this.taxiJob) {
+      this.stopTaxiJob(state, 'TAXI SHIFT ENDED');
+      return false;
+    }
+    if (!state.inVehicle || !playerVehicle?.spec?.isTaxi) {
+      state.toast = { text: 'Board a yellow Cala Cab Taxi to run fares', timer: 2.2 };
+      return false;
+    }
+    this.stopVigilanteJob(state, null);
+    this.taxiJob = { phase: 'pickup', target: null, destName: '', timer: 65, faresDone: 0, farePay: 0, passengerMesh: null };
+    this._spawnNextTaxiPickup(playerPos);
+    state.toast = { text: `TAXI FARE · PICK UP PASSENGER (${this.taxiJob.destName})`, timer: 3.2 };
+    if (audio) audio.playUiBeep(780);
+    return true;
+  }
+
+  _spawnNextTaxiPickup(playerPos) {
+    if (!this.taxiJob) return;
+    if (this.taxiJob.passengerMesh) {
+      this.scene.remove(this.taxiJob.passengerMesh);
+      this.taxiJob.passengerMesh = null;
+    }
+    const candidates = TAXI_DESTINATIONS.filter((d) => Math.hypot(d.x - playerPos.x, d.z - playerPos.z) > 45);
+    const pick = candidates[Math.floor(Math.random() * candidates.length)] ?? TAXI_DESTINATIONS[0];
+    this.taxiJob.phase = 'pickup';
+    this.taxiJob.target = { x: pick.x, z: pick.z };
+    this.taxiJob.destName = pick.name;
+    this.taxiJob.timer = 65;
+
+    const pass = buildCharacterMesh({
+      jacket: 0x34e0c8, accent: 0xffffff, pants: 0x1e293b, outfitStyle: 'coastal', withWeapon: false,
+    });
+    pass.position.set(pick.x, 0, pick.z);
+    this.scene.add(pass);
+    this.taxiJob.passengerMesh = pass;
+  }
+
+  stopTaxiJob(state, toastMsg = null) {
+    if (this.taxiJob?.passengerMesh) {
+      this.scene.remove(this.taxiJob.passengerMesh);
+    }
+    this.taxiJob = null;
+    if (!this.vigilanteJob) this.jobBeacon.visible = false;
+    if (toastMsg && state) state.toast = { text: toastMsg, timer: 2.4 };
+  }
+
+  // Classic GTA Vigilante Patrol side-job [T] while driving a stolen CDPD Cruiser!
+  toggleVigilanteJob(state, playerPos, playerVehicle, combat, audio) {
+    if (this.vigilanteJob) {
+      this.stopVigilanteJob(state, 'VIGILANTE PATROL ENDED');
+      return false;
+    }
+    if (!state.inVehicle || !playerVehicle?.spec?.isPolice) {
+      state.toast = { text: 'Steal a CDPD Cruiser to launch Vigilante Patrol', timer: 2.2 };
+      return false;
+    }
+    this.stopTaxiJob(state, null);
+    this.vigilanteJob = { level: 1, targetEnemy: null, targetName: '', timer: 80, bounty: 1200 };
+    this._spawnNextVigilanteTarget(playerPos, combat);
+    state.toast = { text: `VIGILANTE LV.1 · INTERCEPT ${this.vigilanteJob.targetName.toUpperCase()}`, timer: 3.4 };
+    if (audio) audio.playUiBeep(820);
+    return true;
+  }
+
+  _spawnNextVigilanteTarget(playerPos, combat) {
+    if (!this.vigilanteJob || !combat) return;
+    const candidates = VIGILANTE_SPAWNS.filter((s) => Math.hypot(s.x - playerPos.x, s.z - playerPos.z) > 40);
+    const sp = candidates[Math.floor(Math.random() * candidates.length)] ?? VIGILANTE_SPAWNS[0];
+    const hp = 85 + (this.vigilanteJob.level - 1) * 25;
+    const enemy = combat.spawnEnemy(sp.x, sp.z, Math.atan2(playerPos.x - sp.x, playerPos.z - sp.z), false, hp);
+    enemy.isVigilanteTarget = true;
+    this.vigilanteJob.targetEnemy = enemy;
+    this.vigilanteJob.targetName = sp.name;
+    this.vigilanteJob.bounty = 1200 * this.vigilanteJob.level;
+    this.vigilanteJob.timer = 80;
+  }
+
+  stopVigilanteJob(state, toastMsg = null) {
+    this.vigilanteJob = null;
+    if (!this.taxiJob) this.jobBeacon.visible = false;
+    if (toastMsg && state) state.toast = { text: toastMsg, timer: 2.4 };
+  }
+
+  getActiveSideJobInfo() {
+    if (this.taxiJob) {
+      return {
+        kind: 'taxi',
+        title: `CALA CAB · FARE ${this.taxiJob.faresDone + 1}`,
+        label: this.taxiJob.phase === 'pickup'
+          ? `Pick up passenger at ${this.taxiJob.destName}`
+          : `Drive passenger to ${this.taxiJob.destName}`,
+        timer: this.taxiJob.timer,
+        target: this.taxiJob.target,
+      };
+    }
+    if (this.vigilanteJob && this.vigilanteJob.targetEnemy) {
+      return {
+        kind: 'vigilante',
+        title: `VIGILANTE · LEVEL ${this.vigilanteJob.level}`,
+        label: `Eliminate ${this.vigilanteJob.targetName} ($${this.vigilanteJob.bounty.toLocaleString()})`,
+        timer: this.vigilanteJob.timer,
+        target: { x: this.vigilanteJob.targetEnemy.pos.x, z: this.vigilanteJob.targetEnemy.pos.z },
+      };
+    }
+    return null;
+  }
+
+  updateSideJobs(dt, elapsed, state, playerPos, playerVehicle, combat, audio) {
+    if (this.taxiJob) {
+      const tj = this.taxiJob;
+      tj.timer -= dt;
+      if (tj.timer <= 0) {
+        this.stopTaxiJob(state, 'TAXI FARE EXPIRED');
+      } else if (tj.target) {
+        this.jobBeacon.visible = true;
+        this.jobBeacon.material.color.setHex(0x34e0c8);
+        this.jobBeacon.position.set(tj.target.x, 0.22, tj.target.z);
+        this.jobBeacon.scale.setScalar(1 + Math.sin(elapsed * 5) * 0.14);
+        if (tj.passengerMesh) {
+          tj.passengerMesh.rotation.y = Math.atan2(playerPos.x - tj.target.x, playerPos.z - tj.target.z);
+        }
+        const dist = Math.hypot(playerPos.x - tj.target.x, playerPos.z - tj.target.z);
+        const drivingTaxi = state.inVehicle && playerVehicle?.spec?.isTaxi;
+        if (drivingTaxi && dist < 11.5 && (playerVehicle.speed ?? 0) < 12) {
+          if (tj.phase === 'pickup') {
+            if (tj.passengerMesh) {
+              this.scene.remove(tj.passengerMesh);
+              tj.passengerMesh = null;
+            }
+            const drops = TAXI_DESTINATIONS.filter((d) => Math.hypot(d.x - playerPos.x, d.z - playerPos.z) > 80);
+            const drop = drops[Math.floor(Math.random() * drops.length)] ?? TAXI_DESTINATIONS[0];
+            tj.phase = 'dropoff';
+            tj.target = { x: drop.x, z: drop.z };
+            tj.destName = drop.name;
+            tj.farePay = 650 + Math.round(Math.hypot(drop.x - playerPos.x, drop.z - playerPos.z) * 1.8);
+            tj.timer = 75;
+            state.toast = { text: `PASSENGER BOARDED · DRIVE TO ${drop.name.toUpperCase()}`, timer: 3.2 };
+            if (audio) audio.playUiBeep(860);
+          } else {
+            const tip = Math.round(Math.max(100, tj.timer * 8));
+            const total = tj.farePay + tip;
+            tj.faresDone += 1;
+            state.cash += total;
+            state.careerStats.cashEarned += total;
+            state.rp += 95;
+            state.toast = { text: `FARE COMPLETE · +$${total.toLocaleString()} ($${tip} TIP)`, timer: 3.4 };
+            if (audio && audio.playPickupChime) audio.playPickupChime();
+            else if (audio) audio.playUiBeep(960);
+            this._spawnNextTaxiPickup(playerPos);
+          }
+        }
+      }
+    } else if (this.vigilanteJob) {
+      const vj = this.vigilanteJob;
+      vj.timer -= dt;
+      const e = vj.targetEnemy;
+      if (vj.timer <= 0) {
+        this.stopVigilanteJob(state, 'SUSPECT ESCAPED');
+      } else if (!e || e.dead || e.downed) {
+        state.cash += vj.bounty;
+        state.careerStats.cashEarned += vj.bounty;
+        state.rp += 130 * vj.level;
+        state.toast = { text: `SUSPECT NEUTRALIZED · +$${vj.bounty.toLocaleString()} BOUNTY`, timer: 3.6 };
+        if (audio && audio.playPickupChime) audio.playPickupChime();
+        else if (audio) audio.playUiBeep(980);
+        vj.level += 1;
+        this._spawnNextVigilanteTarget(playerPos, combat);
+      } else {
+        this.jobBeacon.visible = true;
+        this.jobBeacon.material.color.setHex(0xff3b5c);
+        this.jobBeacon.position.set(e.pos.x, (e.pos.y ?? 0) + 0.22, e.pos.z);
+        this.jobBeacon.scale.setScalar(1 + Math.sin(elapsed * 6) * 0.16);
+      }
+    } else {
+      this.jobBeacon.visible = false;
+    }
+  }
+
+  getPromptText(state, playerVehicle = null, nearbyBoardable = null) {
     if (this.fishingSession) return '[SPACE] Reel / Strike · [E] Stop Fishing';
     if (this.roofSession) return '[SPACE] Hammer Tile · [E] Stop Repair';
-    if (this.nearbyFishing) return `[E] Fish at ${this.nearbyFishing.name}`;
-    if (this.nearbyGarden) return `[E] Tend Garden at ${this.nearbyGarden.name}`;
-    if (this.nearbyRoof) return `[E] Repair Terracotta Roof (${this.nearbyRoof.name})`;
+    if (state?.inVehicle && playerVehicle?.engineStalled) return '[F] Exit Flooded Vehicle to Swim';
     if (this.nearbyShop) {
+      if (this.nearbyShop.kind === 'garage' && state?.inVehicle) {
+        return "[E] Pay 'n' Spray — Repair, Repaint & Clear Wanted";
+      }
       const owned = state?.ownedProperties?.has(this.nearbyShop.id);
       if (!owned && this.nearbyShop.price > 0) {
         return `[E] Buy ${this.nearbyShop.name} ($${this.nearbyShop.price.toLocaleString()})`;
       }
       return `[E] Enter ${this.nearbyShop.name}`;
     }
+    if (!state?.inVehicle && nearbyBoardable) {
+      return nearbyBoardable.spec?.isBoat
+        ? `[F] Pilot ${nearbyBoardable.spec.name}`
+        : `[F] Enter ${nearbyBoardable.spec?.name ?? 'Vehicle'}`;
+    }
+    if (state?.inVehicle && playerVehicle?.spec?.isTaxi && !this.taxiJob) {
+      return '[T] Start Taxi Fares';
+    }
+    if (state?.inVehicle && playerVehicle?.spec?.isPolice && !this.vigilanteJob) {
+      return '[T] Vigilante Patrol · [H] Police Siren';
+    }
+    if (this.nearbyFishing) return `[E] Fish at ${this.nearbyFishing.name}`;
+    if (this.nearbyGarden) return `[E] Tend Garden at ${this.nearbyGarden.name}`;
+    if (this.nearbyRoof) return `[E] Repair Terracotta Roof (${this.nearbyRoof.name})`;
     if (this.nearbyRace) return `[E] Start Race: ${this.nearbyRace.name}`;
     return '';
   }

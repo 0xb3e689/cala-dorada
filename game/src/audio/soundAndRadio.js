@@ -74,7 +74,7 @@ export class SoundAndRadio {
     }
   }
 
-  update(dt, elapsed, state, vehicleSpeed, isDrifting) {
+  update(dt, elapsed, state, vehicleSpeed, isDrifting, playerSirenActive = false) {
     if (!this.unlocked || !this.ctx) return;
     if (this.ctx.state === 'suspended') return;
 
@@ -94,10 +94,10 @@ export class SoundAndRadio {
     }
 
     if (this.sirenGain && this.sirenOsc) {
-      const wantSiren = playing && state.wantedLevel > 0;
-      this.sirenGain.gain.setTargetAtTime(wantSiren ? 0.065 * sfxVol : 0, this.ctx.currentTime, 0.12);
+      const wantSiren = playing && (state.wantedLevel > 0 || playerSirenActive);
+      this.sirenGain.gain.setTargetAtTime(wantSiren ? 0.07 * sfxVol : 0, this.ctx.currentTime, 0.12);
       if (wantSiren) {
-        const wail = 620 + Math.sin(elapsed * 5.2) * 210;
+        const wail = 620 + Math.sin(elapsed * (playerSirenActive ? 6.4 : 5.2)) * 210;
         this.sirenOsc.frequency.setTargetAtTime(wail, this.ctx.currentTime, 0.05);
       }
     }
@@ -483,6 +483,68 @@ export class SoundAndRadio {
     g.connect(this.masterGain);
     osc.start(now);
     osc.stop(now + 0.6);
+  }
+
+  playHorn(isBoat = false) {
+    if (!this.unlocked || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    const freqs = isBoat ? [196, 247] : [415, 523];
+    const dur = isBoat ? 0.42 : 0.24;
+    for (const hz of freqs) {
+      const osc = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(hz, now);
+      const filt = this.ctx.createBiquadFilter();
+      filt.type = 'lowpass';
+      filt.frequency.value = isBoat ? 650 : 1400;
+      g.gain.setValueAtTime(0.001, now);
+      g.gain.linearRampToValueAtTime(0.11, now + 0.02);
+      g.gain.setValueAtTime(0.10, now + dur - 0.04);
+      g.gain.exponentialRampToValueAtTime(0.001, now + dur);
+      osc.connect(filt);
+      filt.connect(g);
+      g.connect(this.masterGain);
+      osc.start(now);
+      osc.stop(now + dur + 0.02);
+    }
+  }
+
+  playPickupChime() {
+    if (!this.unlocked || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    [740, 987, 1318].forEach((hz, i) => {
+      const t = now + i * 0.055;
+      const osc = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(hz, t);
+      g.gain.setValueAtTime(0.12, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+      osc.connect(g);
+      g.connect(this.masterGain);
+      osc.start(t);
+      osc.stop(t + 0.15);
+    });
+  }
+
+  playSprayPaint() {
+    if (!this.unlocked || !this.ctx || !this.noiseBuf) return;
+    const now = this.ctx.currentTime;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    const filt = this.ctx.createBiquadFilter();
+    filt.type = 'highpass';
+    filt.frequency.value = 2600;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.001, now);
+    g.gain.linearRampToValueAtTime(0.15, now + 0.06);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
+    src.connect(filt);
+    filt.connect(g);
+    g.connect(this.masterGain);
+    src.start(now);
+    src.stop(now + 0.58);
   }
 
   playUiBeep(hz = 680) {

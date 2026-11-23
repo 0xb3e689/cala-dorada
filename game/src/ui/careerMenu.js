@@ -203,12 +203,12 @@ export class CareerMenu {
       </div>
       <div class="info-card">
         <h3>Controls</h3>
-        <p><strong>WASD</strong> Move / Drive · <strong>Mouse</strong> Look / Aim<br>
+        <p><strong>WASD</strong> Move / Drive · <strong>Mouse</strong> Look / Aim / Drive-By<br>
         <strong>Shift</strong> Sprint / Nitro · <strong>Space</strong> Jump / Handbrake / Surface<br>
-        <strong>C / Ctrl</strong> Dive Underwater · <strong>1–6 / Scroll</strong> Weapons<br>
-        <strong>F</strong> Enter / Exit Vehicle · <strong>E</strong> Interact / Bail Out<br>
-        <strong>Q / Tab</strong> Weapon Wheel · <strong>R</strong> Reload / Radio<br>
-        <strong>Z / X / C</strong> Crew Support · <strong>Esc / M</strong> Pause Map</p>
+        <strong>F</strong> Enter / Exit Car or Boat · <strong>E</strong> Interact / Pay 'n' Spray<br>
+        <strong>H</strong> Horn / Police Siren · <strong>L</strong> Headlights · <strong>B</strong> Look Back<br>
+        <strong>V</strong> Camera Distance · <strong>T</strong> Taxi / Vigilante Job<br>
+        <strong>1–6 / Q</strong> Weapons · <strong>R</strong> Reload / Radio · <strong>Esc / M</strong> Map</p>
       </div>
     </div>`;
   }
@@ -226,7 +226,8 @@ export class CareerMenu {
     this.el.querySelectorAll('[data-save]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const slot = Number(btn.dataset.save);
-        saveManager.saveSlot(slot, state);
+        const snap = this.cb.getWorldSnapshot ? this.cb.getWorldSnapshot() : null;
+        saveManager.saveSlot(slot, state, snap);
         state.toast = { text: `SAVED SLOT ${slot}`, timer: 2.2 };
         this.render(state, playerPos, missionTarget, saveManager);
       });
@@ -259,7 +260,7 @@ export class CareerMenu {
     });
     const camBtn = this.el.querySelector('#btn-cycle-cam');
     if (camBtn) camBtn.addEventListener('click', () => {
-      const modes = ['chase', 'action', 'hood'];
+      const modes = ['close', 'medium', 'far'];
       state.settings.cameraMode = modes[(modes.indexOf(state.settings.cameraMode) + 1) % modes.length];
       this.render(state, playerPos, missionTarget, saveManager);
     });
