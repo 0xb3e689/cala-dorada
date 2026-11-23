@@ -153,6 +153,111 @@ export const RIVER_BRIDGES = [
   { id: 'puente-cabo', name: 'Puente del Cabo', x1: 96, x2: 154, z: -340, halfZ: 10.5, deckY: 5.5, rampLen: 14 },
 ];
 
+export function getBridgeDeckYAt(x, z) {
+  for (let i = 0; i < RIVER_BRIDGES.length; i++) {
+    const b = RIVER_BRIDGES[i];
+    if (Math.abs(z - b.z) > b.halfZ) continue;
+    if (x < b.x1 || x > b.x2) continue;
+    const minEdge = Math.min(x - b.x1, b.x2 - x);
+    if (minEdge >= b.rampLen) return b.deckY;
+    const t = Math.max(0, Math.min(1, minEdge / b.rampLen));
+    return b.deckY * (t * t * (3 - 2 * t));
+  }
+  return 0;
+}
+
+export function isOnPierAt(x, z) {
+  if (Math.abs(x - (-210)) <= 3.0 && z >= 245 && z <= 292) return true;
+  if (Math.abs(x - 225) <= 3.6 && z >= 268 && z <= 325) return true;
+  return false;
+}
+
+// Pure coordinate check for navigable water (ocean, Marina Bay, Río Dorado) respecting elevated bridges & piers
+export function isWaterAt(x, z, entityY = 0) {
+  const deckY = getBridgeDeckYAt(x, z);
+  if (deckY > 0.15 && entityY >= deckY - 1.5) return false;
+  if (isOnPierAt(x, z)) return false;
+  if (z > 274.5) return true;
+  if (x > 66 && x < 154 && z > 156 && z <= 278) return true;
+  if (z >= -438 && z <= 165) {
+    const cx = getRiverCenterX(z);
+    const hw = getRiverHalfWidth(z);
+    if (Math.abs(x - cx) < hw) return true;
+  }
+  return false;
+}
+
+export function getNearestBridgeForZ(z) {
+  let best = RIVER_BRIDGES[0];
+  let bestDist = Infinity;
+  for (const b of RIVER_BRIDGES) {
+    const d = Math.abs(b.z - z);
+    if (d < bestDist) {
+      bestDist = d;
+      best = b;
+    }
+  }
+  return best;
+}
+
+// Street Crime Gang Territories (3-4 member ambient crews: Los Caimanes & Viperas del Sur)
+export const GANG_TURFS = [
+  {
+    crewId: 'caimanes-mercado-south',
+    gangId: 'los-caimanes',
+    gangName: 'Los Caimanes',
+    district: 'mercado-nocturno',
+    center: { x: -304, z: -20 },
+    count: 4,
+    weapons: ['pistol', 'smg', 'bat', 'pistol'],
+  },
+  {
+    crewId: 'caimanes-mercado-north',
+    gangId: 'los-caimanes',
+    gangName: 'Los Caimanes',
+    district: 'mercado-nocturno',
+    center: { x: -256, z: -92 },
+    count: 3,
+    weapons: ['smg', 'bat', 'pistol'],
+  },
+  {
+    crewId: 'caimanes-cenit-pier',
+    gangId: 'los-caimanes',
+    gangName: 'Los Caimanes',
+    district: 'puerto-cenit',
+    center: { x: 278, z: -38 },
+    count: 4,
+    weapons: ['pistol', 'smg', 'pistol', 'bat'],
+  },
+  {
+    crewId: 'viperas-viejo-plaza',
+    gangId: 'viperas-del-sur',
+    gangName: 'Viperas del Sur',
+    district: 'barrio-viejo',
+    center: { x: 196, z: -234 },
+    count: 4,
+    weapons: ['pistol', 'smg', 'pistol', 'smg'],
+  },
+  {
+    crewId: 'viperas-viejo-alley',
+    gangId: 'viperas-del-sur',
+    gangName: 'Viperas del Sur',
+    district: 'barrio-viejo',
+    center: { x: 232, z: -278 },
+    count: 3,
+    weapons: ['smg', 'pistol', 'pistol'],
+  },
+  {
+    crewId: 'viperas-cenit-docks',
+    gangId: 'viperas-del-sur',
+    gangName: 'Viperas del Sur',
+    district: 'puerto-cenit',
+    center: { x: 312, z: -90 },
+    count: 4,
+    weapons: ['smg', 'pistol', 'smg', 'pistol'],
+  },
+];
+
 // Roadside Explosive Gas Station (Estación Sol) & Red Fuel Barrel Clusters
 export const GAS_STATION = {
   id: 'estacion-sol',
@@ -193,7 +298,7 @@ export const WORLD_PICKUPS = [
   { id: 'pk-park-med', kind: 'health', x: -90, z: 76, amount: 50 },
   { id: 'pk-pd-armor', kind: 'armor', x: 118, z: -102, amount: 50 },
   { id: 'pk-taller-armor', kind: 'armor', x: -236, z: -124, amount: 50 },
-  { id: 'pk-mercado-ammo', kind: 'ammo', x: -310, z: -38, amount: 2 },
+  { id: 'pk-mercado-ammo', kind: 'ammo', x: -303.5, z: -38, amount: 2 },
   { id: 'pk-cenit-ammo', kind: 'ammo', x: 304, z: -112, amount: 2 },
   { id: 'pk-parking-cash', kind: 'cash', x: 18, z: 58, amount: 1200 },
   { id: 'pk-pier-cash', kind: 'cash', x: 225, z: 264, amount: 1500 },

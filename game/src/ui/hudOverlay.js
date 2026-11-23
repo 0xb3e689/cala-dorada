@@ -233,7 +233,8 @@ export class HudOverlay {
 
     for (const e of enemies ?? []) {
       if (e.dead || e.downed || !e.attacking) continue;
-      _projVec.set(e.pos.x, e.pos.y + 2.08, e.pos.z);
+      const yOff = e.yOffset ?? 2.08;
+      _projVec.set(e.pos.x, (e.pos.y ?? 0) + yOff, e.pos.z);
       _projVec.project(camera);
       if (_projVec.z >= 1 || _projVec.z < -1) continue;
       const sx = (_projVec.x * 0.5 + 0.5) * W;
@@ -243,8 +244,9 @@ export class HudOverlay {
       const curHp = Math.max(0, Math.round(e.hp));
       const maxHp = Math.max(1, Math.round(e.maxHp));
       const pct = Math.round((curHp / maxHp) * 100);
+      const badgeLabel = e.label ? `HOSTILE · ${e.label}` : 'HOSTILE';
       html += `<div class="enemy-tag" style="left:${sx.toFixed(1)}px;top:${sy.toFixed(1)}px">
-        <div class="enemy-threat-badge"><span>!</span><span>HOSTILE</span></div>
+        <div class="enemy-threat-badge"><span>!</span><span>${badgeLabel}</span></div>
         <div class="enemy-hp-card">
           <div class="enemy-hp-track"><div class="enemy-hp-fill" style="width:${pct}%"></div></div>
           <span class="enemy-hp-num">${curHp}/${maxHp}</span>

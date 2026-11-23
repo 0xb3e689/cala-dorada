@@ -14,12 +14,17 @@ export class SoundAndRadio {
     this.engineGain = null;
     this.sirenOsc = null;
     this.sirenGain = null;
+    this.heliOsc = null;
+    this.heliLfo = null;
+    this.heliGain = null;
     this.noiseBuf = null;
     this.radioStep = 0;
     this.radioAccum = 0;
     this.unlocked = false;
     this.lastPainPlayedAt = 0;
     this._painToggle = 0;
+    this.sirenPlaying = false;
+    this.heliRotorPlaying = false;
   }
 
   unlock() {
@@ -68,14 +73,58 @@ export class SoundAndRadio {
       this.sirenGain.connect(this.masterGain);
       this.sirenOsc.start();
 
+      // HALCÓN-1 helicopter rotor chop loop (amplitude-modulated low thump)
+      this.heliOsc = this.ctx.createOscillator();
+      this.heliOsc.type = 'sawtooth';
+      this.heliOsc.frequency.value = 46;
+      const heliFilter = this.ctx.createBiquadFilter();
+      heliFilter.type = 'lowpass';
+      heliFilter.frequency.value = 140;
+      const heliChopGain = this.ctx.createGain();
+      heliChopGain.gain.value = 0.5;
+      this.heliLfo = this.ctx.createOscillator();
+      this.heliLfo.type = 'sine';
+      this.heliLfo.frequency.value = 11.5;
+      const lfoDepth = this.ctx.createGain();
+      lfoDepth.gain.value = 0.45;
+      this.heliLfo.connect(lfoDepth);
+      lfoDepth.connect(heliChopGain.gain);
+      this.heliGain = this.ctx.createGain();
+      this.heliGain.gain.value = 0;
+      this.heliOsc.connect(heliFilter);
+      heliFilter.connect(heliChopGain);
+      heliChopGain.connect(this.heliGain);
+      this.heliGain.connect(this.masterGain);
+      this.heliOsc.start();
+      this.heliLfo.start();
+
       this.unlocked = true;
     } catch {
       // Headless or blocked audio
     }
   }
 
-  update(dt, elapsed, state, vehicleSpeed, isDrifting, playerSirenActive = false) {
+  stopPursuitAudio() {
+    this.sirenPlaying = false;
+    this.heliRotorPlaying = false;
     if (!this.unlocked || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    if (this.sirenGain) {
+      this.sirenGain.gain.cancelScheduledValues(now);
+      this.sirenGain.gain.setValueAtTime(0, now);
+    }
+    if (this.heliGain) {
+      this.heliGain.gain.cancelScheduledValues(now);
+      this.heliGain.gain.setValueAtTime(0, now);
+    }
+  }
+
+  update(dt, elapsed, state, vehicleSpeed, isDrifting, playerSirenActive = false, heliActive = false) {
+    if (!this.unlocked || !this.ctx) {
+      this.sirenPlaying = false;
+      this.heliRotorPlaying = false;
+      return;
+    }
     if (this.ctx.state === 'suspended') return;
 
     const sfxVol = state.settings.sfxVolume;
@@ -93,13 +142,20 @@ export class SoundAndRadio {
       this.engineOsc.frequency.setTargetAtTime(52 + vehicleSpeed * 2.4, this.ctx.currentTime, 0.06);
     }
 
+    const wantSiren = playing && (state.wantedLevel > 0 || playerSirenActive);
+    this.sirenPlaying = wantSiren;
     if (this.sirenGain && this.sirenOsc) {
-      const wantSiren = playing && (state.wantedLevel > 0 || playerSirenActive);
-      this.sirenGain.gain.setTargetAtTime(wantSiren ? 0.07 * sfxVol : 0, this.ctx.currentTime, 0.12);
+      this.sirenGain.gain.setTargetAtTime(wantSiren ? 0.07 * sfxVol : 0, this.ctx.currentTime, 0.10);
       if (wantSiren) {
         const wail = 620 + Math.sin(elapsed * (playerSirenActive ? 6.4 : 5.2)) * 210;
         this.sirenOsc.frequency.setTargetAtTime(wail, this.ctx.currentTime, 0.05);
       }
+    }
+
+    const wantHeli = playing && Boolean(heliActive);
+    this.heliRotorPlaying = wantHeli;
+    if (this.heliGain) {
+      this.heliGain.gain.setTargetAtTime(wantHeli ? 0.09 * sfxVol : 0, this.ctx.currentTime, 0.12);
     }
 
     // Procedural Radio Station Arpeggiator (plays in vehicle)

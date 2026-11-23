@@ -38,10 +38,12 @@ export function createInitialState() {
 
     // WASTED / BUSTED cinematic status state
     statusOverlay: null, // null | { type: 'WASTED' | 'BUSTED', timer: 3.4, total: 3.4 }
-    bustProgress: 0,     // 0..2.5s arrest timer when cornered by police
+    bustProgress: 0,     // 0..2.2s arrest timer when stationary & cornered by on-foot police (< 2.5m)
 
     wantedLevel: 0,
     wantedHeat: 0, // 0..600 (1★=60, 2★=160, 3★=290, 4★=420, 5★=560)
+    shotAtPolice: false, // True once player fires weapons at police (disables 2★ arrest -> lethal force)
+    inSight: false,
     evadeTimer: 0,
     hiddenFromPolice: false,
     airUnitDeployed: false,

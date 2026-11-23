@@ -177,8 +177,7 @@ export class CalaDoradaEngine {
         this.camPitch = 0.22;
         this.activities.stopTaxiJob(this.state);
         this.activities.stopVigilanteJob(this.state);
-        this.police.clearAll();
-        this.combat.clearEnemies();
+        this.clearAllPursuitAndCombatState();
         this.syncCustomizationVisuals();
         this.missions.startMission(this.state, 'm1', this.combat, this.police);
         this.startPlay();
@@ -557,7 +556,10 @@ export class CalaDoradaEngine {
     this.camYaw = veh.yaw;
     this.audio.playUiBeep(620);
 
-    // Jacking a police cruiser adds gradual heat; taxi/boat gives a crisp hint
+    // Jacking a police cruiser adds gradual heat; carjacking traffic spawns a reactive driver (70% timid / 30% brave!)
+    if (veh.isTraffic && !veh.spec?.isPolice) {
+      this.traffic.spawnCarjackedDriver(veh.pos, veh.yaw, this.player.pos);
+    }
     if (veh.spec?.isPolice) {
       this.police.addHeat(this.state, 85);
       this.state.toast = { text: 'CDPD CRUISER · [H] SIREN · [T] VIGILANTE', timer: 3.0 };
@@ -667,6 +669,25 @@ export class CalaDoradaEngine {
     }
   }
 
+  // Complete pursuit, police, helicopter, projectile, audio & NPC aggro cleanup on WASTED / BUSTED AND on respawn!
+  clearAllPursuitAndCombatState() {
+    this.state.wantedLevel = 0;
+    this.state.wantedHeat = 0;
+    this.state.bustProgress = 0;
+    this.state.inSight = false;
+    this.state.hiddenFromPolice = false;
+    this.state.airUnitDeployed = false;
+    this.state.shotAtPolice = false;
+    this.state.signalJamTimer = 0;
+
+    this.police.clearAll(this.state);
+    this.heli.dismiss(this.state);
+    this.combat.clearEnemies();
+    this.combat.clearProjectiles();
+    this.traffic.resetAggro();
+    this.audio.stopPursuitAudio();
+  }
+
   triggerStatusOverlay(type) {
     if (this.state.statusOverlay) return;
     this.state.statusOverlay = { type, timer: 3.4, total: 3.4 };
@@ -675,6 +696,10 @@ export class CalaDoradaEngine {
     this.input.suppressFireFor(400);
     this.activities.stopTaxiJob(this.state);
     this.activities.stopVigilanteJob(this.state);
+
+    // Immediately despawn ALL police/heli/projectiles, stop sirens/rotor audio, and reset NPC/gang aggro!
+    this.clearAllPursuitAndCombatState();
+
     // Cleanly exit & release any vehicle before WASTED / BUSTED animation so controls are NEVER locked!
     if (this.state.inVehicle && this.playerVehicle) {
       const veh = this.playerVehicle;
@@ -692,18 +717,15 @@ export class CalaDoradaEngine {
 
   _completeStatusRespawn(type) {
     this.state.statusOverlay = null;
-    this.state.bustProgress = 0;
     this.state.damageFlash = 0;
-    this.state.wantedLevel = 0;
-    this.state.wantedHeat = 0;
-    this.state.hiddenFromPolice = false;
-    this.state.airUnitDeployed = false;
     this.state.oxygen = this.state.maxOxygen ?? 100;
     this.state.swimming = false;
     this.state.diving = false;
     this.state.submergeDepth = 0;
-    this.police.clearAll();
-    this.combat.clearEnemies();
+
+    // Guarantee 100% peaceful 0-star respawn with zero leftover units, bullets, sirens, or NPC aggro!
+    this.clearAllPursuitAndCombatState();
+
     this.player.resetDeathAnim();
     this.player.knockdownTimer = 0;
     this.player.flinchTimer = 0;
@@ -1078,6 +1100,23 @@ export class CalaDoradaEngine {
           this.police.addHeat(this.state, res?.killed ? 36 : 22);
         }
       }
+
+      for (const g of this.traffic.gangMembers) {
+        if (g.dead || g.downed || g.knockdownTimer > 1.0) continue;
+        const dx = g.pos.x - v.pos.x;
+        const dz = g.pos.z - v.pos.z;
+        if (dx * dx + dz * dz < hitRadius * hitRadius) {
+          const len = Math.hypot(dx, dz) || 1;
+          const res = this.traffic.applyGangDamage(g, Math.round(v.speed * 3.0), {
+            x: (dx / len + fwdX) * 0.6,
+            z: (dz / len + fwdZ) * 0.6,
+          }, {
+            source: 'vehicle', impactSpeed: v.speed, state: this.state, combatSystem: this.combat,
+          });
+          this.audio.playCarHitHuman(v.speed);
+          this.police.addHeat(this.state, res?.killed ? 28 : 16);
+        }
+      }
     }
 
     // 2. Traffic cars & police cruisers striking on-foot Player!
@@ -1128,7 +1167,7 @@ export class CalaDoradaEngine {
     this.vehiclePhysics.spawnExplosion(exp.pos);
     this.audio.playExplosion();
     this.camShake = Math.max(this.camShake, 0.95);
-    this.traffic.triggerPanicNear(exp.pos, 65);
+    this.traffic.triggerPanicNear(exp.pos, 65, { heavy: true });
     this.police.addHeat(this.state, 45);
 
     const blastRadius = 9.5;
@@ -1224,7 +1263,7 @@ export class CalaDoradaEngine {
   _firePlayerWeapon(allVehicles, lifecycleCallbacks, fromVehicle = false) {
     const camDir = new THREE.Vector3();
     this.camera.getWorldDirection(camDir);
-    const aimTarget = this.camera.position.clone().addScaledVector(camDir, 45);
+    const aimTarget = this.camera.position.clone().addScaledVector(camDir, 120);
     let origin;
     if (fromVehicle) {
       const v = this.playerVehicle;
@@ -1238,38 +1277,57 @@ export class CalaDoradaEngine {
     const fired = this.combat.tryPlayerFire(this.state, this.player, aimDir, this.audio, null, (kind) => {
       if (kind === 'gunshot') {
         this.police.addHeat(this.state, 12);
-        this.traffic.triggerPanicNear(this.getFocusPos(), 50);
+        this.traffic.triggerPanicNear(this.getFocusPos(), 50, { heavy: true });
       }
     }, {
       fromVehicle,
       origin: fromVehicle ? origin : null,
+      aimRayOrigin: this.camera.position.clone(),
+      aimRayDir: camDir.clone(),
       ignoreVehicle: fromVehicle ? this.playerVehicle : null,
       footOfficers: this.police.footOfficers,
+      gangMembers: this.traffic.gangMembers,
       peds: this.traffic.peds,
       vehicles: allVehicles,
       explosives: this.explosives,
+      heliUnit: this.heli,
       onRecoil: (kick) => {
-        this.camPitch = Math.max(-0.34, Math.min(0.82, this.camPitch - kick));
+        // Expanded vertical pitch range: up to +70 deg (-1.22 rad) skyward, down to -45 deg (+0.785 rad)
+        this.camPitch = Math.max(-1.22, Math.min(0.785, this.camPitch - kick));
         this.camShake = Math.min(0.45, this.camShake + kick * 2.2);
       },
-      onPedShot: (ped, dmg, dir) => {
-        const res = this.traffic.applyPedShot(ped, dmg, dir);
-        this.police.addHeat(this.state, res?.killed ? 44 : 24);
+      onPedShot: (ped, dmg, dir, isMelee) => {
+        const res = this.traffic.applyPedShot(ped, dmg, dir, { isMelee });
+        this.police.addHeat(this.state, res?.killed ? 44 : (isMelee ? 16 : 24));
       },
-      onPoliceShot: (_off, killed) => {
-        this.police.addHeat(this.state, killed ? 65 : 40);
+      onGangShot: (gm, dmg, dir, isMelee) => {
+        const res = this.traffic.applyGangDamage(gm, dmg, dir, {
+          source: isMelee ? 'melee' : 'weapon',
+          attacker: 'player',
+          state: this.state,
+          combatSystem: this.combat,
+        });
+        this.police.addHeat(this.state, res?.killed ? 28 : 14);
+      },
+      onPoliceShot: (_off, killed, isFirearm) => {
+        this.police.addHeat(this.state, killed ? 65 : 40, { shotAtPolice: Boolean(isFirearm) });
+      },
+      onHeliShot: (hitPt, dmg) => {
+        const res = this.heli.applyDamage(dmg, hitPt, this.state, this.combat, this.vehiclePhysics, this.audio);
+        this.police.addHeat(this.state, res.killed ? 95 : 30, { shotAtPolice: true });
       },
       onVehicleShot: (veh, dmg, hitPt, hitNormal) => {
         this.vehiclePhysics.spawnCollisionSparks(hitPt, hitNormal.x, hitNormal.z, 8);
         this.vehiclePhysics.applyDamage(veh, dmg * 0.85, lifecycleCallbacks);
-        this.traffic.triggerPanicNear(hitPt, 40);
-        this.police.addHeat(this.state, veh.isPoliceVehicle || veh.spec?.isPolice ? 30 : 14);
+        this.traffic.triggerPanicNear(hitPt, 40, { heavy: true });
+        const isPol = Boolean(veh.isPoliceVehicle || veh.spec?.isPolice);
+        this.police.addHeat(this.state, isPol ? 30 : 14, { shotAtPolice: isPol });
       },
       onExplosiveShot: (exp, dmg) => {
         this._damageExplosive(exp, dmg, lifecycleCallbacks);
       },
     });
-      if (fired && fromVehicle && this.driveByFlash) {
+    if (fired && fromVehicle && this.driveByFlash) {
       this.driveByFlash.position.copy(origin).addScaledVector(aimDir, 0.55);
       this.driveByFlash.visible = true;
       this.driveByFlashTimer = 0.075;
@@ -1278,7 +1336,7 @@ export class CalaDoradaEngine {
   }
 
   _handleVehicleExplosion(v) {
-    this.traffic.triggerPanicNear(v.pos, 60);
+    this.traffic.triggerPanicNear(v.pos, 60, { heavy: true });
     this.police.addHeat(this.state, 80);
     this.camShake = 0.9;
     const blastRadius = 9.5;
@@ -1318,6 +1376,13 @@ export class CalaDoradaEngine {
         this.traffic.applyPedVehicleImpact(p, dir.x, dir.z, 22);
       }
     }
+    for (const g of this.traffic.gangMembers) {
+      if (g.downed) continue;
+      if (g.pos.distanceTo(v.pos) < blastRadius) {
+        const dir = g.pos.clone().sub(v.pos).normalize();
+        this.traffic.applyGangDamage(g, 140, dir, { source: 'vehicle', impactSpeed: 22, state: this.state, combatSystem: this.combat });
+      }
+    }
   }
 
   step(dt, forceDom = false, skipRender = false) {
@@ -1353,13 +1418,13 @@ export class CalaDoradaEngine {
       if (this.camShake > 0) this.camShake = Math.max(0, this.camShake - rawDt * 2.2);
       if (this.camFlinch > 0) this.camFlinch = Math.max(0, this.camFlinch - rawDt * 2.8);
 
-      // Full Mouse Look (both On Foot and While Driving!)
+      // Full Mouse Look (both On Foot and While Driving! Upward +70 deg [-1.22 rad] to Downward -45 deg [+0.785 rad])
       if (!this.state.weaponWheelOpen && !this.state.statusOverlay) {
         const dx = this.input.lookDeltaX;
         const dy = this.input.lookDeltaY;
         if (Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01) {
           this.camYaw = wrapAngle(this.camYaw - dx * 0.0032);
-          this.camPitch = Math.max(-0.34, Math.min(0.82, this.camPitch + dy * 0.0026));
+          this.camPitch = Math.max(-1.22, Math.min(0.785, this.camPitch + dy * 0.0026));
           this.mouseLookIdleTimer = 0;
         } else {
           this.mouseLookIdleTimer += rawDt;
@@ -1474,17 +1539,49 @@ export class CalaDoradaEngine {
       const sirenSource = (this.state.inVehicle && this.playerVehicle?.sirenActive && this.playerVehicle.spec?.isPolice)
         ? this.playerVehicle
         : null;
-      this.traffic.update(simDt, this.elapsed, pos, this.state.wantedLevel > 0, sirenSource);
-      this.combat.update(simDt, this.elapsed, this.state, pos, (dmg) => this.applyPlayerDamage(dmg), this.audio, allVehicles);
-      this.heli.update(simDt, this.elapsed, this.state, pos, this.combat, (dmg) => this.applyPlayerDamage(dmg), this.audio);
 
-      const playerSpd = this.state.inVehicle ? this.playerVehicle.speed : Math.hypot(this.player.vel.x, this.player.vel.z);
-      const policeRes = this.police.update(
-        simDt, this.elapsed, this.state, pos, yaw, this.heli, this.combat, playerSpd,
-        (dmg) => this.applyPlayerDamage(dmg), this.audio, allVehicles
-      );
-      if (policeRes.bustedReady && !this.state.statusOverlay) {
-        this.triggerStatusOverlay('BUSTED');
+      this.traffic.update(simDt, this.elapsed, pos, this.state.wantedLevel > 0, sirenSource, {
+        statusOverlay: Boolean(this.state.statusOverlay),
+        onPlayerHit: (dmg) => this.applyPlayerDamage(dmg),
+        combatSystem: this.combat,
+        audio: this.audio,
+        vehicles: allVehicles,
+        policeUnits: this.police.units,
+        footOfficers: this.police.footOfficers,
+        onGangFired: (gm) => this.police.notifyGangGunfire(gm, this.state),
+        onOfficerHitByGang: (off, dmg, dir) => this.police.applyOfficerDamage(off, dmg, dir, null),
+      });
+
+      if (!this.state.statusOverlay) {
+        this.combat.update(simDt, this.elapsed, this.state, pos, (dmg) => this.applyPlayerDamage(dmg), this.audio, allVehicles);
+        this.heli.update(simDt, this.elapsed, this.state, pos, this.combat, (dmg) => this.applyPlayerDamage(dmg), this.audio, this.vehiclePhysics);
+
+        // Compute exact GTA resistance state for authentic BUSTED break-free rules
+        const moveAxes = this.input.getMoveAxes();
+        const pressingMove = moveAxes.forward !== 0 || moveAxes.right !== 0;
+        const pressingSprint = this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight');
+        const pressingThrottle = moveAxes.forward !== 0;
+        const playerResisting = this.state.inVehicle
+          ? (pressingThrottle || this.input.mouseDown)
+          : (pressingMove || pressingSprint || this.input.mouseDown || this.player.meleeSwingTimer > 0);
+
+        const playerSpd = this.state.inVehicle ? this.playerVehicle.speed : Math.hypot(this.player.vel.x, this.player.vel.z);
+        const policeRes = this.police.update(
+          simDt, this.elapsed, this.state, pos, yaw, this.heli, this.combat, playerSpd,
+          (dmg) => this.applyPlayerDamage(dmg), this.audio, allVehicles, {
+            playerResisting,
+            gangMembers: this.traffic.gangMembers,
+            onGangShotByPolice: (gm, dmg, dir, off) => this.traffic.applyGangDamage(gm, dmg, dir, {
+              attacker: 'police',
+              policeOfficer: off,
+              combatSystem: this.combat,
+            }),
+            onPoliceGunfireNear: (polPos, off) => this.traffic.alertGangsToPoliceNear(polPos, off, 18),
+          }
+        );
+        if (policeRes.bustedReady && !this.state.statusOverlay) {
+          this.triggerStatusOverlay('BUSTED');
+        }
       }
 
       this.missions.update(simDt, this.elapsed, this.state, pos, this.combat, this.police, this.audio);
@@ -1503,7 +1600,10 @@ export class CalaDoradaEngine {
         if (this.state.toast.timer <= 0) this.state.toast = null;
       }
 
-      this.audio.update(simDt, this.elapsed, this.state, this.playerVehicle.speed, this.playerVehicle.drifting, Boolean(sirenSource));
+      this.audio.update(
+        simDt, this.elapsed, this.state, this.playerVehicle.speed, this.playerVehicle.drifting,
+        Boolean(sirenSource), Boolean(this.heli.active || this.heli.crashing)
+      );
       this._updateHud(forceDom);
     } else if (this.state.mode === 'title' && !this.shotFrozen) {
       this.traffic.update(rawDt, this.elapsed, new THREE.Vector3(-120, 0, 200), false);
@@ -1514,8 +1614,34 @@ export class CalaDoradaEngine {
     this._updateCamera(rawDt);
     this.camera.updateMatrixWorld(true);
 
-    // Combine syndicate enemies + hostile on-foot police for world-space combat overlay
-    const allHostiles = this.combat.enemies.concat(this.police.footOfficers);
+    // Check if crosshair is aimed at HALCÓN-1 helicopter to illuminate its overhead ! HOSTILE + HP bar
+    if (this.state.mode === 'playing' && !this.state.statusOverlay && this.heli.isActiveHostile()) {
+      const lookDir = new THREE.Vector3();
+      this.camera.getWorldDirection(lookDir);
+      if (this.heli.testRayHit(this.camera.position, lookDir, 155)) {
+        this.heli.targetedTimer = 1.6;
+      }
+    }
+
+    // Combine syndicate enemies + hostile on-foot police + attacking brave civilians + provoked gangs + targeted/damaged HALCÓN-1!
+    const attackingPeds = this.traffic.peds.filter((p) => p.attacking && !p.dead && !p.downed);
+    const attackingGangs = this.traffic.gangMembers.filter((g) => g.attacking && !g.dead && !g.downed);
+    const allHostiles = this.combat.enemies
+      .concat(this.police.footOfficers)
+      .concat(attackingPeds)
+      .concat(attackingGangs);
+    if (this.heli.isActiveHostile() && (this.heli.targetedTimer > 0 || this.heli.lastHitTimer > 0 || this.heli.hp < this.heli.maxHp)) {
+      allHostiles.push({
+        pos: this.heli.mesh.position,
+        yOffset: 3.8,
+        hp: this.heli.hp,
+        maxHp: this.heli.maxHp,
+        attacking: true,
+        dead: false,
+        downed: false,
+        label: 'HALCÓN-1',
+      });
+    }
     this.hud.updateCombatOverlay({
       state: this.state,
       camera: this.camera,
@@ -1596,9 +1722,10 @@ export class CalaDoradaEngine {
     }
 
     const cy = this.camYaw;
-    const cp = this.camPitch + this.camFlinch * 0.35;
-    const cosP = Math.cos(cp);
-    const sinP = Math.sin(cp);
+    const cp = Math.max(-1.22, Math.min(0.785, this.camPitch + this.camFlinch * 0.35));
+    const lookElev = -cp; // Positive = looking UP into the sky (up to +70 deg / +1.22 rad), Negative = looking down (to -45 deg)
+    const cosE = Math.cos(lookElev);
+    const sinE = Math.sin(lookElev);
     const fwdX = Math.sin(cy);
     const fwdZ = Math.cos(cy);
 
@@ -1612,37 +1739,40 @@ export class CalaDoradaEngine {
       const effYaw = lookBack ? wrapAngle(this.playerVehicle.yaw + Math.PI) : cy;
       const eFwdX = Math.sin(effYaw);
       const eFwdZ = Math.cos(effYaw);
+      const effDist = lookElev > 0 ? THREE.MathUtils.lerp(orbitDist, 6.2, Math.min(1, lookElev / 1.22)) : orbitDist;
       desiredPos = new THREE.Vector3(
-        pos.x - eFwdX * orbitDist * cosP,
-        Math.max(1.4, pos.y + camElev + orbitDist * sinP),
-        pos.z - eFwdZ * orbitDist * cosP
+        pos.x - eFwdX * effDist * cosE,
+        Math.max(pos.y + 0.95, pos.y + camElev - effDist * sinE),
+        pos.z - eFwdZ * effDist * cosE
       );
-      desiredLook = new THREE.Vector3(
-        pos.x + eFwdX * 12,
-        pos.y + 1.75 - sinP * 2.5,
-        pos.z + eFwdZ * 12
-      );
+      const lookDir = new THREE.Vector3(eFwdX * cosE, sinE, eFwdZ * cosE);
+      desiredLook = lookElev > 0.12
+        ? desiredPos.clone().addScaledVector(lookDir, 60)
+        : new THREE.Vector3(pos.x + eFwdX * 14, pos.y + 1.75 + sinE * 4.5, pos.z + eFwdZ * 14);
       if (lookBack) {
-        // Snap rear-view camera crisply like classic GTA!
         this.camPos.copy(desiredPos);
         this.camLook.copy(desiredLook);
       }
     } else {
-      // Over-the-shoulder GTA mouse-look camera (follows diving smoothly underwater too!)
+      // Over-the-shoulder GTA mouse-look camera supporting full +70 deg sky aim to shoot down HALCÓN-1!
       const rtX = -Math.cos(cy);
       const rtZ = Math.sin(cy);
-      const dist = 4.6;
       const diveOffset = this.state.diving ? -(this.state.submergeDepth ?? 0) * 0.65 : 0;
+      const dist = lookElev > 0
+        ? THREE.MathUtils.lerp(4.6, 2.35, Math.min(1, lookElev / 1.22))
+        : 4.6;
+      const shoulderPivot = new THREE.Vector3(
+        pos.x + rtX * 1.05,
+        pos.y + 1.65 + diveOffset,
+        pos.z + rtZ * 1.05
+      );
+      const lookDir = new THREE.Vector3(fwdX * cosE, sinE, fwdZ * cosE);
       desiredPos = new THREE.Vector3(
-        pos.x - fwdX * dist * cosP + rtX * 1.15,
-        Math.max(this.state.diving ? -1.4 : 1.0, pos.y + 1.75 + diveOffset + dist * sinP),
-        pos.z - fwdZ * dist * cosP + rtZ * 1.15
+        shoulderPivot.x - lookDir.x * dist,
+        Math.max(this.state.diving ? -1.4 : pos.y + 0.58, shoulderPivot.y - lookDir.y * dist),
+        shoulderPivot.z - lookDir.z * dist
       );
-      desiredLook = new THREE.Vector3(
-        pos.x + fwdX * 22 * cosP,
-        pos.y + 1.48 + diveOffset - sinP * 14,
-        pos.z + fwdZ * 22 * cosP
-      );
+      desiredLook = desiredPos.clone().addScaledVector(lookDir, 65);
     }
 
     // Apply subtle camera shake on crashes / explosions / getting hit by a car

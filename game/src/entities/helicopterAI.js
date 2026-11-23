@@ -87,6 +87,20 @@ export class HelicopterAI {
     this.spotInitialized = false;
     this.hasVisualLock = false;
     this.fireCd = 2.5;
+
+    // Shootable combat state (240 HP, fuselage + tail hitboxes, smoking distress, flaming crash!)
+    this.maxHp = 240;
+    this.hp = this.maxHp;
+    this.active = false;
+    this.crashing = false;
+    this.destroyed = false;
+    this.crashTimer = 0;
+    this.crashYawRate = 0;
+    this.respawnCooldown = 0;
+    this.lastHitTimer = 0;
+    this.targetedTimer = 0;
+    this.smokeTimer = 0;
+    this._invMat = new THREE.Matrix4();
   }
 
   _buildHeliMesh() {
@@ -306,7 +320,125 @@ export class HelicopterAI {
     return g;
   }
 
+  isActiveHostile() {
+    return Boolean(this.mesh.visible && !this.crashing && !this.destroyed && this.hp > 0);
+  }
+
+  dismiss(state = null) {
+    this.active = false;
+    this.crashing = false;
+    this.destroyed = false;
+    this.crashTimer = 0;
+    this.crashYawRate = 0;
+    this.respawnCooldown = 0;
+    this.hp = this.maxHp;
+    this.lastHitTimer = 0;
+    this.targetedTimer = 0;
+    this.smokeTimer = 0;
+    this.hasVisualLock = false;
+    this.spotInitialized = false;
+    this.vel.set(0, 0, 0);
+    this.mesh.visible = false;
+    this.groundPool.visible = false;
+    if (this.mesh.userData?.cone) this.mesh.userData.cone.visible = true;
+    if (state) state.airUnitDeployed = false;
+  }
+
+  _intersectLocalAABB(ox, oy, oz, dx, dy, dz, minX, maxX, minY, maxY, minZ, maxZ, maxT) {
+    let tMin = 0;
+    let tMax = maxT;
+    const slab = (o, d, lo, hi) => {
+      if (Math.abs(d) < 1e-8) return o >= lo && o <= hi;
+      let t1 = (lo - o) / d;
+      let t2 = (hi - o) / d;
+      if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+      if (t1 > tMin) tMin = t1;
+      if (t2 < tMax) tMax = t2;
+      return tMin <= tMax;
+    };
+    if (!slab(ox, dx, minX, maxX)) return null;
+    if (!slab(oy, dy, minY, maxY)) return null;
+    if (!slab(oz, dz, minZ, maxZ)) return null;
+    return tMin >= 0 && tMin <= maxT ? tMin : null;
+  }
+
+  // Real 3D shootable hitboxes for HALCÓN-1: fuselage cabin + tail boom/rotor (tail hits deal crit!)
+  testRayHit(origin, dir, maxDist = 160) {
+    if (!this.isActiveHostile()) return null;
+    this.mesh.updateMatrixWorld(true);
+    this._invMat.copy(this.mesh.matrixWorld).invert();
+
+    const endWorld = origin.clone().addScaledVector(dir, maxDist);
+    const lOrig = origin.clone().applyMatrix4(this._invMat);
+    const lEnd = endWorld.applyMatrix4(this._invMat);
+    const lVec = lEnd.sub(lOrig);
+    const lMax = lVec.length();
+    if (lMax < 1e-4) return null;
+    const lDir = lVec.divideScalar(lMax);
+
+    const tFuselage = this._intersectLocalAABB(
+      lOrig.x, lOrig.y, lOrig.z, lDir.x, lDir.y, lDir.z,
+      -2.0, 2.0, -1.9, 2.6, -3.2, 5.0, lMax
+    );
+    const tTail = this._intersectLocalAABB(
+      lOrig.x, lOrig.y, lOrig.z, lDir.x, lDir.y, lDir.z,
+      -1.35, 1.35, -0.5, 2.8, -10.6, -2.8, lMax
+    );
+
+    let bestT = null;
+    let part = null;
+    if (tFuselage !== null) {
+      bestT = tFuselage;
+      part = 'fuselage';
+    }
+    if (tTail !== null && (bestT === null || tTail < bestT)) {
+      bestT = tTail;
+      part = 'tail';
+    }
+    if (bestT === null) return null;
+
+    const localHit = lOrig.clone().addScaledVector(lDir, bestT);
+    const worldHit = localHit.applyMatrix4(this.mesh.matrixWorld);
+    const worldDist = origin.distanceTo(worldHit);
+    return { dist: worldDist, point: worldHit, part, crit: part === 'tail' };
+  }
+
+  applyDamage(amount, hitPos, state, combatSystem = null, vehiclePhysics = null, audio = null) {
+    if (!this.isActiveHostile()) return { killed: false, dmg: 0 };
+    const dmg = Math.max(1, Math.round(amount));
+    this.hp = Math.max(0, this.hp - dmg);
+    this.lastHitTimer = 7.0;
+    if (audio) audio.playMetalHit();
+    if (combatSystem && hitPos) {
+      combatSystem.spawnSparks(hitPos, 10, 0xffe073);
+    }
+    if (this.hp <= 0) {
+      this.crashing = true;
+      this.crashTimer = 0;
+      this.crashYawRate = 5.4;
+      this.hasVisualLock = false;
+      this.groundPool.visible = false;
+      this.vel.y = -4.2;
+      if (this.mesh.userData?.cone) this.mesh.userData.cone.visible = false;
+      if (vehiclePhysics) vehiclePhysics.spawnExplosion(this.mesh.position.clone());
+      if (audio) audio.playExplosion();
+      if (state) {
+        state.cash += 2500;
+        state.careerStats.cashEarned += 2500;
+        state.careerStats.takedowns += 1;
+        state.rp += 180;
+        state.toast = { text: 'HALCÓN-1 SHOT DOWN! +$2,500', timer: 3.8 };
+      }
+      return { killed: true, dmg };
+    }
+    return { killed: false, dmg };
+  }
+
   placeForShot(pos, targetPos, bankAngle = 0.14) {
+    this.active = true;
+    this.crashing = false;
+    this.destroyed = false;
+    this.hp = this.maxHp;
     this.mesh.visible = true;
     this.mesh.position.copy(pos);
     this.mesh.lookAt(targetPos.x, pos.y - 4.2, targetPos.z);
@@ -395,22 +527,99 @@ export class HelicopterAI {
     this.groundPool.position.set(poolX, poolY, poolZ);
   }
 
-  update(dt, elapsed, state, targetPos, combatSystem = null, onPlayerHit = null, audio = null) {
+  update(dt, elapsed, state, targetPos, combatSystem = null, onPlayerHit = null, audio = null, vehiclePhysics = null) {
+    if (this.lastHitTimer > 0) this.lastHitTimer = Math.max(0, this.lastHitTimer - dt);
+    if (this.targetedTimer > 0) this.targetedTimer = Math.max(0, this.targetedTimer - dt);
+
+    // Flaming spinning crash dive when shot down to 0 HP!
+    if (this.crashing) {
+      this.active = false;
+      this.crashTimer += dt;
+      this.vel.y -= 13.8 * dt;
+      this.mesh.position.addScaledVector(this.vel, dt);
+      this.yaw += this.crashYawRate * dt;
+      this.mesh.rotation.order = 'YXZ';
+      this.mesh.rotation.set(0.42, this.yaw, 0.56 + Math.sin(elapsed * 9.5) * 0.28);
+      this.mesh.updateMatrixWorld(true);
+      const { mainRotor, tailRotor, strobeRed, strobeBlue, cone } = this.mesh.userData;
+      mainRotor.rotation.y += dt * 9;
+      tailRotor.rotation.x += dt * 5;
+      strobeRed.visible = Math.sin(elapsed * 22) > 0;
+      strobeBlue.visible = false;
+      if (cone) cone.visible = false;
+      this.groundPool.visible = false;
+
+      this.smokeTimer -= dt;
+      if (this.smokeTimer <= 0 && vehiclePhysics) {
+        this.smokeTimer = 0.065;
+        vehiclePhysics.spawnSmoke(this.mesh.position.clone(), Math.random() < 0.5 ? 0xff6e1e : 0x1b1b22, 1.55, 1.25);
+      }
+
+      const groundY = this.collisionWorld ? this.collisionWorld.getSurfaceHeight(this.mesh.position.x, this.mesh.position.z, 0) : 0;
+      if (this.mesh.position.y <= groundY + 1.8 || this.crashTimer >= 4.0) {
+        const crashPt = this.mesh.position.clone();
+        crashPt.y = Math.max(groundY + 0.6, crashPt.y);
+        if (vehiclePhysics) {
+          vehiclePhysics.spawnExplosion(crashPt);
+          vehiclePhysics.spawnExplosion(crashPt.clone().add(new THREE.Vector3(2.2, 0.8, -1.6)));
+        }
+        if (audio) audio.playExplosion();
+        this.crashing = false;
+        this.destroyed = true;
+        this.mesh.visible = false;
+        this.groundPool.visible = false;
+        this.respawnCooldown = 45;
+        if (state) state.airUnitDeployed = false;
+      }
+      return;
+    }
+
+    // Cooldown before a replacement HALCÓN-1 can re-deploy at 4★+
+    if (this.destroyed) {
+      this.active = false;
+      this.mesh.visible = false;
+      this.groundPool.visible = false;
+      this.hasVisualLock = false;
+      if (state.wantedLevel >= 4 && !state.statusOverlay) {
+        this.respawnCooldown -= dt;
+        if (this.respawnCooldown <= 0) {
+          this.destroyed = false;
+          this.hp = this.maxHp;
+          state.airUnitDeployed = true;
+        }
+      }
+      return;
+    }
+
+    const shouldFly = Boolean(state.airUnitDeployed && state.wantedLevel >= 4 && !state.statusOverlay);
     const wasVis = this.mesh.visible;
-    this.mesh.visible = state.airUnitDeployed;
-    this.groundPool.visible = state.airUnitDeployed && state.signalJamTimer <= 0;
-    if (!state.airUnitDeployed) {
+    this.mesh.visible = shouldFly;
+    this.active = shouldFly;
+    this.groundPool.visible = shouldFly && state.signalJamTimer <= 0;
+    if (!shouldFly) {
       this.spotInitialized = false;
       this.hasVisualLock = false;
       return;
     }
 
     if (!wasVis) {
+      this.hp = this.maxHp;
       this.mesh.position.set(targetPos.x + 28, 34, targetPos.z + 32);
       this.vel.set(0, 0, 0);
       this.spotTargetPos.copy(targetPos);
       this.lastSeenPos.copy(targetPos);
       this.spotInitialized = true;
+    }
+
+    // Smoking & distress shudder when HP <= 50%
+    const hpRatio = this.hp / Math.max(1, this.maxHp);
+    if (hpRatio <= 0.5) {
+      this.smokeTimer -= dt;
+      if (this.smokeTimer <= 0 && vehiclePhysics) {
+        this.smokeTimer = hpRatio <= 0.25 ? 0.08 : 0.14;
+        const smokePos = this.mesh.position.clone().add(new THREE.Vector3(0, 1.2, 0));
+        vehiclePhysics.spawnSmoke(smokePos, hpRatio <= 0.25 && Math.random() < 0.4 ? 0xff7a26 : 0x24242c, 1.15, 1.05);
+      }
     }
 
     // Orbit around player when visually locked, or around lastSeenPos when player hides under cover!
@@ -455,7 +664,8 @@ export class HelicopterAI {
     this.yaw += Math.max(-1.6 * dt, Math.min(1.6 * dt, yawDiff * 2.2 * dt));
 
     const latAcc = ((this.vel.x - prevVx) * Math.cos(this.yaw) - (this.vel.z - prevVz) * Math.sin(this.yaw)) / Math.max(0.005, dt);
-    const desiredBank = Math.max(-0.28, Math.min(0.28, -latAcc * 0.028));
+    const distressWobble = hpRatio <= 0.45 ? Math.sin(elapsed * 13) * 0.14 * (1 - hpRatio) : 0;
+    const desiredBank = Math.max(-0.28, Math.min(0.28, -latAcc * 0.028)) + distressWobble;
     this.bankRoll = THREE.MathUtils.lerp(this.bankRoll, desiredBank, Math.min(1, dt * 3.5));
 
     this.mesh.rotation.order = 'YXZ';

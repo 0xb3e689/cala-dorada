@@ -31,15 +31,30 @@ export class CombatSystem {
     });
   }
 
+  clearProjectiles() {
+    for (const t of this.tracers) {
+      this.group.remove(t.mesh);
+      t.geos.forEach((g) => g.dispose());
+      t.mats.forEach((m) => m.dispose());
+    }
+    for (const s of this.sparks) {
+      this.group.remove(s.mesh);
+      if (s.mesh.material) s.mesh.material.dispose();
+    }
+    this.tracers = [];
+    this.sparks = [];
+    this.damagePopups = [];
+    this.hitConfirmTimer = 0;
+    this.hitConfirmCrit = false;
+  }
+
   clearEnemies() {
     for (const e of this.enemies) {
       this.group.remove(e.mesh);
       if (e.bloodMark) this.group.remove(e.bloodMark);
     }
     this.enemies = [];
-    this.damagePopups = [];
-    this.hitConfirmTimer = 0;
-    this.hitConfirmCrit = false;
+    this.clearProjectiles();
   }
 
   spawnEnemy(x, z, yaw = 0, downed = false, maxHp = 100) {
@@ -231,54 +246,138 @@ export class CombatSystem {
   spawnPickup(pos, kind = 'health', opts = {}) {
     const g = new THREE.Group();
     const glowCols = {
-      health: ['#ffffff', 'rgba(66,227,140,0.75)'],
-      armor: ['#ffffff', 'rgba(75,163,255,0.75)'],
-      ammo: ['#ffffff', 'rgba(255,190,85,0.75)'],
-      cash: ['#ffffff', 'rgba(52,224,132,0.75)'],
+      health: ['#fff5f5', 'rgba(255,46,68,0.68)'],
+      armor: ['#e0f7ff', 'rgba(56,189,248,0.72)'],
+      ammo: ['#fff6d6', 'rgba(218,168,58,0.70)'],
+      cash: ['#e6ffef', 'rgba(34,197,94,0.72)'],
     };
     const [gIn, gMid] = glowCols[kind] ?? glowCols.health;
 
     if (kind === 'health') {
-      // Crisp white medkit box with glowing emerald cross
-      const box = new THREE.Mesh(
-        new THREE.BoxGeometry(0.68, 0.48, 0.34),
-        new THREE.MeshStandardMaterial({ color: 0xf4f8fc, emissive: 0x164a32, emissiveIntensity: 0.45, roughness: 0.3 })
-      );
-      const crossMat = new THREE.MeshBasicMaterial({ color: 0x22e584 });
-      const cv = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.34, 0.38), crossMat);
-      const ch = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.14, 0.38), crossMat);
-      g.add(box, cv, ch);
+      // Crisp white medical case with carry handle & bold BRIGHT RED cross (+) clearly visible on top and all sides!
+      const caseMat = new THREE.MeshStandardMaterial({
+        color: 0xf8fafc, emissive: 0x2c3340, emissiveIntensity: 0.25, roughness: 0.28, metalness: 0.12,
+      });
+      const latchMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.72, roughness: 0.3 });
+      const redCrossMat = new THREE.MeshBasicMaterial({ color: 0xff1e38 });
+
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.74, 0.52, 0.36), caseMat);
+      const lidSeam = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.035, 0.38), latchMat);
+      lidSeam.position.y = 0.08;
+      // Top medical handle
+      const handleTop = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.055, 0.07), latchMat);
+      handleTop.position.set(0, 0.34, 0);
+      const handleL = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.10, 0.07), latchMat);
+      handleL.position.set(-0.12, 0.29, 0);
+      const handleR = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.10, 0.07), latchMat);
+      handleR.position.set(0.12, 0.29, 0);
+      // Bold BRIGHT RED cross protruding on front & back faces
+      const cvFB = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.36, 0.40), redCrossMat);
+      const chFB = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.13, 0.40), redCrossMat);
+      // Bold BRIGHT RED cross on left & right sides
+      const cvLR = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.28, 0.10), redCrossMat);
+      const chLR = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.10, 0.26), redCrossMat);
+      // Bold BRIGHT RED cross on top face
+      const cvTop = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.04, 0.26), redCrossMat);
+      cvTop.position.set(0.20, 0.265, 0);
+      const chTop = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.04, 0.12), redCrossMat);
+      chTop.position.set(0.20, 0.265, 0);
+
+      g.add(body, lidSeam, handleTop, handleL, handleR, cvFB, chFB, cvLR, chLR, cvTop, chTop);
+      g.userData = { pickupType: 'health', crossColor: 0xff1e38 };
     } else if (kind === 'armor') {
-      // Glowing blue tactical armor vest / shield icon
-      const vest = new THREE.Mesh(
-        new THREE.OctahedronGeometry(0.46, 0),
-        new THREE.MeshStandardMaterial({ color: 0x3b82f6, emissive: 0x2563eb, emissiveIntensity: 0.65, metalness: 0.5, roughness: 0.25 })
-      );
-      vest.scale.set(1.0, 1.25, 0.55);
-      g.add(vest);
+      // Distinct tactical navy/cyan Kevlar vest silhouette with chest/back armor plates & shoulder straps
+      const navyMat = new THREE.MeshStandardMaterial({
+        color: 0x18345e, emissive: 0x0e2548, emissiveIntensity: 0.42, roughness: 0.42, metalness: 0.38,
+      });
+      const cyanTrimMat = new THREE.MeshStandardMaterial({
+        color: 0x38bdf8, emissive: 0x0284c7, emissiveIntensity: 0.65, roughness: 0.25, metalness: 0.55,
+      });
+      const darkPlateMat = new THREE.MeshStandardMaterial({ color: 0x0f1d36, roughness: 0.55, metalness: 0.45 });
+
+      const torso = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.54, 0.24), navyMat);
+      torso.position.y = -0.04;
+      const frontPlate = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.36, 0.29), darkPlateMat);
+      frontPlate.position.y = -0.02;
+      // Shoulder straps forming a clear vest neck cutout
+      const strapL = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.22, 0.24), navyMat);
+      strapL.position.set(-0.20, 0.30, 0);
+      const strapR = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.22, 0.24), navyMat);
+      strapR.position.set(0.20, 0.30, 0);
+      // Cyan ballistic MOLLE stripes & chest chevron badge
+      const molle1 = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.045, 0.31), cyanTrimMat);
+      molle1.position.y = 0.08;
+      const molle2 = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.045, 0.31), cyanTrimMat);
+      molle2.position.y = -0.06;
+      const waistBelt = new THREE.Mesh(new THREE.BoxGeometry(0.60, 0.08, 0.28), cyanTrimMat);
+      waistBelt.position.y = -0.25;
+
+      g.add(torso, frontPlate, strapL, strapR, molle1, molle2, waistBelt);
+      g.userData = { pickupType: 'armor', isKevlarVest: true };
     } else if (kind === 'ammo') {
-      // Golden tactical ammo crate
-      const crate = new THREE.Mesh(
-        new THREE.BoxGeometry(0.66, 0.42, 0.44),
-        new THREE.MeshStandardMaterial({ color: 0xd99b26, emissive: 0x8a5808, emissiveIntensity: 0.55, metalness: 0.45, roughness: 0.35 })
-      );
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.69, 0.10, 0.46), new THREE.MeshBasicMaterial({ color: 0xffe478 }));
-      g.add(crate, stripe);
+      // Olive-drab & brass military ammo crate with hinged lid, carry handle & gleaming brass rounds
+      const oliveMat = new THREE.MeshStandardMaterial({
+        color: 0x4b5c34, emissive: 0x1e2912, emissiveIntensity: 0.35, roughness: 0.52, metalness: 0.38,
+      });
+      const darkOliveMat = new THREE.MeshStandardMaterial({ color: 0x323d22, roughness: 0.6, metalness: 0.4 });
+      const brassMat = new THREE.MeshStandardMaterial({
+        color: 0xe6b93d, emissive: 0x7c5808, emissiveIntensity: 0.42, metalness: 0.82, roughness: 0.22,
+      });
+      const copperTipMat = new THREE.MeshStandardMaterial({ color: 0xd97706, metalness: 0.78, roughness: 0.26 });
+
+      const box = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.42, 0.38), oliveMat);
+      const lid = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.08, 0.42), darkOliveMat);
+      lid.position.y = 0.22;
+      const clasp = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.43), brassMat);
+      clasp.position.set(0, 0.10, 0);
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.74, 0.06, 0.40), brassMat);
+      stripe.position.y = -0.08;
+      // 3 gleaming brass rifle rounds resting cleanly atop the crate lid
+      for (const rx of [-0.14, 0, 0.14]) {
+        const casing = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.036, 0.18, 8), brassMat);
+        casing.position.set(rx, 0.34, 0);
+        const bullet = new THREE.Mesh(new THREE.ConeGeometry(0.032, 0.09, 8), copperTipMat);
+        bullet.position.set(rx, 0.47, 0);
+        g.add(casing, bullet);
+      }
+      g.add(box, lid, clasp, stripe);
+      g.userData = { pickupType: 'ammo', isAmmoCrate: true };
     } else {
-      // Emerald green cash stack
-      const stack = new THREE.Mesh(
-        new THREE.BoxGeometry(0.62, 0.24, 0.38),
-        new THREE.MeshStandardMaterial({ color: 0x22c55e, emissive: 0x15803d, emissiveIntensity: 0.6, roughness: 0.4 })
-      );
-      const band = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.26, 0.40), new THREE.MeshBasicMaterial({ color: 0xffd24d }));
-      g.add(stack, band);
+      // Crisp emerald-green folded banknote stack with gold/tan currency band & subtle green rim glow
+      const billDarkMat = new THREE.MeshStandardMaterial({
+        color: 0x15803d, emissive: 0x0c4a24, emissiveIntensity: 0.48, roughness: 0.42, metalness: 0.08,
+      });
+      const billTopMat = new THREE.MeshStandardMaterial({
+        color: 0x22c55e, emissive: 0x146c35, emissiveIntensity: 0.55, roughness: 0.36, metalness: 0.08,
+      });
+      const billPrintMat = new THREE.MeshBasicMaterial({ color: 0xbbf7d0 });
+      const bandMat = new THREE.MeshStandardMaterial({
+        color: 0xe8c468, emissive: 0x8a6412, emissiveIntensity: 0.38, roughness: 0.34, metalness: 0.32,
+      });
+
+      const layer1 = new THREE.Mesh(new THREE.BoxGeometry(0.70, 0.09, 0.36), billDarkMat);
+      layer1.position.y = -0.10;
+      const layer2 = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.09, 0.37), billTopMat);
+      layer2.position.y = 0.0;
+      const layer3 = new THREE.Mesh(new THREE.BoxGeometry(0.70, 0.09, 0.36), billTopMat);
+      layer3.position.y = 0.10;
+      // Printed bill border / medallion inlays on top & bottom
+      const printTop = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.015, 0.24), billPrintMat);
+      printTop.position.y = 0.15;
+      const printBot = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.015, 0.24), billPrintMat);
+      printBot.position.y = -0.15;
+      // Gold/tan currency wrapper strap around center of stack
+      const band = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.315, 0.395), bandMat);
+      g.add(layer1, layer2, layer3, printTop, printBot, band);
+      g.rotation.z = 0.16;
+      g.userData = { pickupType: 'cash', hasCurrencyBand: true };
     }
 
     const halo = new THREE.Sprite(new THREE.SpriteMaterial({
       map: getRadialGlowTexture(gIn, gMid, 'rgba(0,0,0,0)'),
       transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
     }));
-    halo.scale.set(1.65, 1.65, 1);
+    halo.scale.set(1.55, 1.55, 1);
     g.add(halo);
 
     const baseY = (pos.y ?? 0) + 0.95;
@@ -384,10 +483,13 @@ export class CombatSystem {
     const hitTotals = new Map();
     const vehicleHitTotals = new Map();
     const explosiveHitTotals = new Map();
+    let heliHitTotal = null;
     const policeOfficers = extraTargets.footOfficers ?? [];
+    const gangMembers = extraTargets.gangMembers ?? [];
     const peds = extraTargets.peds ?? [];
     const vehicles = extraTargets.vehicles ?? [];
     const explosives = extraTargets.explosives ?? [];
+    const heliUnit = extraTargets.heliUnit ?? null;
     const ignoreVehicle = extraTargets.ignoreVehicle ?? null;
 
     // Dedicated generous close-range forward melee arc check (Fists & Alloy Bat)
@@ -424,37 +526,79 @@ export class CombatSystem {
         }
       };
       checkMeleeList(this.enemies, 'enemy');
+      if (hitTotals.size < 2) checkMeleeList(gangMembers, 'gang');
       if (hitTotals.size < 2) checkMeleeList(policeOfficers, 'police');
       if (hitTotals.size < 2) checkMeleeList(peds, 'ped');
     } else {
+      // True 3D camera crosshair ray convergence so aiming straight up into the sky hits HALCÓN-1 pinpoint!
+      let baseAimDir = aimDir.clone().normalize();
+      const airRange = weapon.id === 'shotgun' ? 52 : Math.max(weapon.range, 145);
+      if (extraTargets.aimRayOrigin && extraTargets.aimRayDir) {
+        const camO = extraTargets.aimRayOrigin;
+        const camD = extraTargets.aimRayDir;
+        const pCenter = (extraTargets.fromVehicle ? origin : player.pos.clone().add(new THREE.Vector3(0, 1.35, 0)));
+        const startT = Math.max(0.2, pCenter.sub(camO).dot(camD) - 0.15);
+        const rayStart = camO.clone().addScaledVector(camD, startT);
+        let targetPt = rayStart.clone().addScaledVector(camD, airRange);
+        let bestCamDist = airRange;
+        if (this.collisionWorld) {
+          const camEnv = this.collisionWorld.raycast(rayStart, camD, weapon.range, { vehicles, ignoreVehicle });
+          if (camEnv && camEnv.dist < bestCamDist) {
+            bestCamDist = camEnv.dist;
+            targetPt.set(camEnv.point.x, camEnv.point.y, camEnv.point.z);
+          }
+        }
+        if (heliUnit && heliUnit.isActiveHostile && heliUnit.isActiveHostile()) {
+          const camHeli = heliUnit.testRayHit(rayStart, camD, Math.min(airRange, bestCamDist));
+          if (camHeli && camHeli.dist < bestCamDist) {
+            bestCamDist = camHeli.dist;
+            targetPt.copy(camHeli.point);
+          }
+        }
+        baseAimDir = targetPt.sub(origin).normalize();
+      }
+
       const pellets = weapon.pellets ?? 1;
       for (let p = 0; p < pellets; p++) {
-        const dir = aimDir.clone();
+        const dir = baseAimDir.clone();
         dir.x += (Math.random() - 0.5) * weapon.spread;
         dir.y += (Math.random() - 0.5) * weapon.spread * 0.6;
         dir.z += (Math.random() - 0.5) * weapon.spread;
         dir.normalize();
 
         // 1. Raycast against solid 3D world (buildings, walls, overhead roofs, bridge decks, piers, AND vehicles!) FIRST!
+        const maxEnvDist = dir.y > 0.18 ? airRange : weapon.range;
         const envHit = this.collisionWorld
-          ? this.collisionWorld.raycast(origin, dir, weapon.range, { vehicles, ignoreVehicle })
+          ? this.collisionWorld.raycast(origin, dir, maxEnvDist, { vehicles, ignoreVehicle })
           : null;
 
-        let bestDist = envHit ? envHit.dist : weapon.range;
+        let bestDist = envHit ? envHit.dist : maxEnvDist;
         let hitTarget = null;
         let hitKind = null;
         let hitHead = false;
         let hitExplosive = null;
         let hitExplosivePt = null;
+        let hitHeli = null;
+
+        // 1b. Check airborne HALCÓN-1 Helicopter 3D hitboxes (fuselage + tail) strictly closer than any building!
+        if (heliUnit && heliUnit.isActiveHostile && heliUnit.isActiveHostile()) {
+          const hres = heliUnit.testRayHit(origin, dir, Math.min(airRange, bestDist));
+          if (hres && hres.dist < bestDist) {
+            bestDist = hres.dist;
+            hitHeli = hres;
+          }
+        }
 
         // 2. Check explosive gas pumps & red fuel barrels
+        const groundCap = Math.min(bestDist, weapon.range);
         for (const exp of explosives) {
           if (exp.exploded) continue;
-          const eres = this._testExplosiveRay(origin, dir, bestDist, exp);
-          if (eres) {
+          const eres = this._testExplosiveRay(origin, dir, groundCap, exp);
+          if (eres && eres.dist < bestDist) {
             bestDist = eres.dist;
             hitExplosive = exp;
             hitExplosivePt = eres.point;
+            hitHeli = null;
           }
         }
 
@@ -463,18 +607,20 @@ export class CombatSystem {
           for (const e of arr) {
             if (e.dead || e.downed) continue;
             const pos = e.pos ?? e.mesh.position;
-            const res = this._testHumanRay(origin, dir, bestDist, pos);
+            const res = this._testHumanRay(origin, dir, Math.min(bestDist, weapon.range), pos);
             if (res) {
               bestDist = res.dist;
               hitTarget = e;
               hitKind = kind;
               hitHead = res.isHead;
               hitExplosive = null;
+              hitHeli = null;
             }
           }
         };
 
         checkList(this.enemies, 'enemy');
+        checkList(gangMembers, 'gang');
         checkList(policeOfficers, 'police');
         checkList(peds, 'ped');
 
@@ -490,6 +636,16 @@ export class CombatSystem {
           prev.pos = endPoint;
           hitTotals.set(hitTarget, prev);
           this.spawnSparks(endPoint, pellets > 1 ? 3 : 6, 0xff8040);
+        } else if (hitHeli) {
+          const isCrit = Boolean(hitHeli.crit);
+          const dmg = Math.round(weapon.damage * (isCrit ? 1.35 : 1.0));
+          if (!heliHitTotal) {
+            heliHitTotal = { dmg: 0, crit: false, point: hitHeli.point.clone() };
+          }
+          heliHitTotal.dmg += dmg;
+          heliHitTotal.crit = heliHitTotal.crit || isCrit;
+          heliHitTotal.point.copy(hitHeli.point);
+          this.spawnSparks(hitHeli.point, pellets > 1 ? 4 : 9, 0xffe073);
         } else if (hitExplosive) {
           const prev = explosiveHitTotals.get(hitExplosive) ?? { dmg: 0, point: hitExplosivePt };
           prev.dmg += weapon.damage;
@@ -518,7 +674,12 @@ export class CombatSystem {
         this.spawnDamagePopup(info.pos, info.dmg, info.crit, weapon.melee ? 'melee' : 'weapon');
         this.hitConfirmTimer = 0.24;
         this.hitConfirmCrit = info.crit;
-        if (extraTargets.onPedShot) extraTargets.onPedShot(target, info.dmg, info.dir);
+        if (extraTargets.onPedShot) extraTargets.onPedShot(target, info.dmg, info.dir, Boolean(weapon.melee));
+      } else if (info.kind === 'gang') {
+        this.spawnDamagePopup(info.pos, info.dmg, info.crit, weapon.melee ? 'melee' : 'weapon');
+        this.hitConfirmTimer = 0.24;
+        this.hitConfirmCrit = info.crit;
+        if (extraTargets.onGangShot) extraTargets.onGangShot(target, info.dmg, info.dir, Boolean(weapon.melee));
       } else if (info.kind === 'police') {
         const res = this.applyEnemyDamage(target, info.dmg, info.pos, state, {
           source: weapon.melee ? 'melee' : 'weapon',
@@ -526,7 +687,7 @@ export class CombatSystem {
           dir: info.dir,
           onEnemyDown: extraTargets.onPoliceKilled,
         });
-        if (extraTargets.onPoliceShot) extraTargets.onPoliceShot(target, res.killed);
+        if (extraTargets.onPoliceShot) extraTargets.onPoliceShot(target, res.killed, !weapon.melee);
       } else {
         this.applyEnemyDamage(target, info.dmg, info.pos, state, {
           source: weapon.melee ? 'melee' : 'weapon',
@@ -534,6 +695,16 @@ export class CombatSystem {
           dir: info.dir,
           onEnemyDown,
         });
+      }
+    }
+
+    // Apply HALCÓN-1 Helicopter hits (hit-marker X + weapon damage popup + metallic sparks + crash!)
+    if (heliHitTotal) {
+      this.spawnDamagePopup(heliHitTotal.point, heliHitTotal.dmg, heliHitTotal.crit, 'weapon');
+      this.hitConfirmTimer = 0.26;
+      this.hitConfirmCrit = heliHitTotal.crit;
+      if (extraTargets.onHeliShot) {
+        extraTargets.onHeliShot(heliHitTotal.point, heliHitTotal.dmg, heliHitTotal.crit);
       }
     }
 
