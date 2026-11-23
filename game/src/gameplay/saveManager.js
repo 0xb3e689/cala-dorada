@@ -8,7 +8,7 @@ const DEFAULT_SLOTS = {
   1: {
     savedAt: '18:42',
     savedDate: 'Today',
-    completion: 68.1,
+    completion: 65.4,
     act: 'Act II',
     missionTitle: 'Bridge Toll Takedown',
     districtName: 'Paseo Dorado',

@@ -457,6 +457,7 @@ export function poseHumanCombat(mesh, active = true) {
 export function poseHumanStride(mesh, t, panicked = false) {
   const l = mesh.userData.limbs;
   if (!l) return;
+  l.upperBody.position.y = 0.90;
   if (t === 0 && !panicked) {
     l.upperBody.rotation.set(0, 0, 0);
     l.legL.rotation.set(0, 0, -0.03);
@@ -469,30 +470,133 @@ export function poseHumanStride(mesh, t, panicked = false) {
     if (l.forearmR) l.forearmR.rotation.set(-0.12, 0, 0);
     return;
   }
-  const swing = Math.sin(t) * (panicked ? 0.72 : 0.48);
-  l.upperBody.rotation.x = panicked ? 0.14 : 0.05;
-  l.upperBody.rotation.y = Math.sin(t) * 0.08;
+  const swing = Math.sin(t) * (panicked ? 0.68 : 0.42);
+  l.upperBody.rotation.x = panicked ? 0.18 : 0.03;
+  l.upperBody.rotation.y = Math.sin(t) * (panicked ? 0.11 : 0.06);
   l.legL.rotation.set(swing, 0, 0);
   l.legR.rotation.set(-swing, 0, 0);
-  if (l.calfL) l.calfL.rotation.set(Math.max(0.05, -swing * 0.85 + 0.18), 0, 0);
-  if (l.calfR) l.calfR.rotation.set(Math.max(0.05, swing * 0.85 + 0.18), 0, 0);
+  if (l.calfL) l.calfL.rotation.set(Math.max(0.06, -swing * 0.72 + 0.14), 0, 0);
+  if (l.calfR) l.calfR.rotation.set(Math.max(0.06, swing * 0.72 + 0.14), 0, 0);
   if (panicked) {
-    l.armL.rotation.set(-2.15 + swing * 0.35, 0, 0.22);
-    l.armR.rotation.set(-2.15 - swing * 0.35, 0, -0.22);
-    if (l.forearmL) l.forearmL.rotation.set(-0.45, 0, 0);
-    if (l.forearmR) l.forearmR.rotation.set(-0.45, 0, 0);
+    l.armL.rotation.set(-2.05 + swing * 0.35, 0, 0.24);
+    l.armR.rotation.set(-2.05 - swing * 0.35, 0, -0.24);
+    if (l.forearmL) l.forearmL.rotation.set(-0.48, 0, 0);
+    if (l.forearmR) l.forearmR.rotation.set(-0.48, 0, 0);
   } else {
-    l.armL.rotation.set(-swing * 0.65, 0, 0.05);
-    l.armR.rotation.set(swing * 0.65, 0, -0.05);
-    if (l.forearmL) l.forearmL.rotation.set(-0.22 - Math.max(0, swing * 0.35), 0, 0);
-    if (l.forearmR) l.forearmR.rotation.set(-0.22 - Math.max(0, -swing * 0.35), 0, 0);
+    l.armL.rotation.set(-swing * 0.62, 0, 0.05);
+    l.armR.rotation.set(swing * 0.62, 0, -0.05);
+    if (l.forearmL) l.forearmL.rotation.set(-0.18 - Math.max(0, swing * 0.28), 0, 0);
+    if (l.forearmR) l.forearmR.rotation.set(-0.18 - Math.max(0, -swing * 0.28), 0, 0);
   }
 }
 
+// Distinct athletic SPRINT animation: ~18-degree forward torso lean, wide stride, high knee lift & backward heel kick, fast pumping bent elbows!
+export function poseHumanSprint(mesh, t) {
+  const l = mesh.userData.limbs;
+  if (!l) return;
+  const s = Math.sin(t);
+  const c = Math.cos(t);
+  // 18-degree (~0.31 rad) forward athletic lean + subtle vertical running bounce
+  l.upperBody.rotation.set(0.31 + Math.abs(c) * 0.04, s * 0.14, -s * 0.04);
+  l.upperBody.position.y = 0.89 + Math.abs(s) * 0.04;
+
+  // Wide athletic leg stride with strong knee drive & heel kick
+  const hipL = s * 0.92;
+  const hipR = -s * 0.92;
+  l.legL.rotation.set(hipL, 0, -0.02);
+  l.legR.rotation.set(hipR, 0, 0.02);
+  if (l.calfL) l.calfL.rotation.set(Math.max(0.14, (hipL > 0 ? hipL * 0.55 : -hipL * 1.15) + 0.24), 0, 0);
+  if (l.calfR) l.calfR.rotation.set(Math.max(0.14, (hipR > 0 ? hipR * 0.55 : -hipR * 1.15) + 0.24), 0, 0);
+
+  // Bent elbows pumping dynamically opposite the legs
+  l.armL.rotation.set(-s * 0.95 - 0.15, 0, 0.10);
+  l.armR.rotation.set(s * 0.95 - 0.15, 0, -0.10);
+  if (l.forearmL) l.forearmL.rotation.set(-1.18 - Math.max(0, -s * 0.25), 0, 0);
+  if (l.forearmR) l.forearmR.rotation.set(-1.18 - Math.max(0, s * 0.25), 0, 0);
+}
+
+// Exhausted ("ngos-ngosan") pose: hunched torso + heavy-breathing chest bob + sluggish stride
+export function poseHumanExhausted(mesh, elapsed, moving, phase) {
+  const l = mesh.userData.limbs;
+  if (!l) return;
+  const breath = Math.sin(elapsed * 7.8);
+  if (moving) {
+    poseHumanStride(mesh, phase, false);
+    l.legL.rotation.x *= 0.65;
+    l.legR.rotation.x *= 0.65;
+  } else {
+    poseHumanStride(mesh, 0, false);
+  }
+  l.upperBody.rotation.x = 0.23 + breath * 0.055;
+  l.upperBody.position.y = 0.885 + breath * 0.024;
+  if (!moving) {
+    l.armL.rotation.set(-0.22 + breath * 0.06, 0, 0.14);
+    l.armR.rotation.set(-0.22 + breath * 0.06, 0, -0.14);
+    if (l.forearmL) l.forearmL.rotation.set(-0.42, 0, 0);
+    if (l.forearmR) l.forearmR.rotation.set(-0.42, 0, 0);
+  }
+}
+
+// 3D Weapon Reload arm animation (used by Player, Syndicate Enemies & On-Foot Police!)
+// progress: 0..1 across reload duration
+export function poseHumanReload(mesh, progress) {
+  const l = mesh.userData.limbs;
+  if (!l) return;
+  const p = Math.max(0, Math.min(1, progress));
+  // Tilt weapon sideways in right hand; left hand drops mag (0..0.35), grabs fresh mag (0.35..0.68), inserts & racks (0.68..1.0)
+  l.upperBody.rotation.y = -0.10;
+  l.upperBody.rotation.x = 0.08;
+  l.armR.rotation.set(-0.82, -0.22, -0.34);
+  l.forearmR.rotation.set(-0.62, 0.28, 0.22);
+
+  if (p < 0.35) {
+    const t = p / 0.35;
+    l.armL.rotation.set(-0.84 + t * 0.65, 0.24 - t * 0.18, 0.14);
+    l.forearmL.rotation.set(-0.64 + t * 0.35, 0.12, -0.08);
+  } else if (p < 0.72) {
+    const t = (p - 0.35) / 0.37;
+    l.armL.rotation.set(-0.19 - t * 0.68, 0.06 + t * 0.24, 0.14);
+    l.forearmL.rotation.set(-0.29 - t * 0.42, 0.16, -0.08);
+  } else {
+    const t = (p - 0.72) / 0.28;
+    const rack = Math.sin(t * Math.PI) * 0.28;
+    l.armL.rotation.set(-0.87 - rack, 0.30, 0.16);
+    l.forearmL.rotation.set(-0.71 - rack * 0.6, 0.18, -0.1);
+  }
+}
+
+// Immediate directional body flinch / stagger animation when shot!
+export function poseHumanFlinch(mesh, frac) {
+  const l = mesh.userData.limbs;
+  if (!l || frac <= 0) return;
+  const f = Math.min(1, frac);
+  l.upperBody.rotation.x -= 0.36 * f;
+  l.upperBody.rotation.z += 0.18 * f;
+  l.armL.rotation.x -= 0.28 * f;
+  l.armR.rotation.x -= 0.24 * f;
+}
+
+// Smooth swimming tread animation in deep ocean/bay water
+export function poseHumanSwim(mesh, elapsed) {
+  const l = mesh.userData.limbs;
+  if (!l) return;
+  const s = Math.sin(elapsed * 5.2);
+  l.upperBody.rotation.set(0.32, s * 0.18, 0);
+  l.upperBody.position.y = 0.88;
+  l.armL.rotation.set(-1.35 + s * 0.55, 0.35, 0.45);
+  l.armR.rotation.set(-1.35 - s * 0.55, -0.35, -0.45);
+  if (l.forearmL) l.forearmL.rotation.set(-0.55, 0, 0);
+  if (l.forearmR) l.forearmR.rotation.set(-0.55, 0, 0);
+  l.legL.rotation.set(s * 0.48, 0, 0);
+  l.legR.rotation.set(-s * 0.48, 0, 0);
+  if (l.calfL) l.calfL.rotation.set(0.35, 0, 0);
+  if (l.calfR) l.calfR.rotation.set(0.35, 0, 0);
+}
+
 export class PlayerController {
-  constructor(scene, colliders) {
+  constructor(scene, collisionWorld) {
     this.scene = scene;
-    this.colliders = colliders;
+    this.collisionWorld = collisionWorld;
 
     // Dante Varo (protagonist)
     this.mesh = buildCharacterMesh({
@@ -510,12 +614,18 @@ export class PlayerController {
     this.scene.add(this.partnerMesh);
 
     this.pos = new THREE.Vector3(-120, 0, 200);
+    this.vel = new THREE.Vector3();
     this.yaw = Math.PI / 2;
     this.vy = 0;
     this.grounded = true;
     this.aiming = false;
     this.fishing = false;
     this.muzzleTimer = 0;
+    this.stridePhase = 0;
+    this.pantCooldown = 0;
+    this.flinchTimer = 0;
+    this.knockdownTimer = 0;
+    this.knockVel = new THREE.Vector3();
   }
 
   applyAppearance(app) {
@@ -586,9 +696,21 @@ export class PlayerController {
     return this.pos.clone().add(new THREE.Vector3(0, 1.38, 0));
   }
 
-  updateOnFoot(input, dt, elapsed, cameraYaw) {
+  applyVehicleImpact(dirX, dirZ, speed) {
+    const force = Math.min(18, Math.max(5.5, speed * 0.72));
+    this.knockVel.set(dirX * force, 0, dirZ * force);
+    this.vy = Math.min(7.5, 3.2 + speed * 0.14);
+    this.grounded = false;
+    this.knockdownTimer = Math.max(this.knockdownTimer, 1.35);
+    this.flinchTimer = 0.35;
+  }
+
+  applyBulletFlinch() {
+    this.flinchTimer = Math.max(this.flinchTimer, 0.24);
+  }
+
+  updateOnFoot(input, dt, elapsed, cameraYaw, state, audio) {
     if (this.fishing) {
-      // Animate gentle bobbing of the fishing rod & bobber
       const bob = this.mesh.userData.bobber;
       if (bob) bob.position.y = -2.6 + Math.sin(elapsed * 4.5) * 0.07;
       this.mesh.position.copy(this.pos);
@@ -596,18 +718,79 @@ export class PlayerController {
       return;
     }
 
-    const { forward, right } = input.getMoveAxes();
-    const sprint = input.isDown('ShiftLeft') || input.isDown('ShiftRight');
-    const speed = sprint ? 11.8 : 7.4;
+    if (this.flinchTimer > 0) this.flinchTimer = Math.max(0, this.flinchTimer - dt);
 
-    if (input.lookDeltaX !== 0) {
-      this.yaw -= input.lookDeltaX * 0.0032;
+    // Handle car-hit tumble/knockdown & smooth get-up recovery
+    if (this.knockdownTimer > 0) {
+      this.knockdownTimer = Math.max(0, this.knockdownTimer - dt);
+      this.knockVel.multiplyScalar(Math.pow(0.08, dt));
+      if (this.collisionWorld) {
+        this.collisionWorld.moveAndSlide(this.pos, this.knockVel, 0.62, dt, { bounce: 0.1 });
+      } else {
+        this.pos.x += this.knockVel.x * dt;
+        this.pos.z += this.knockVel.z * dt;
+      }
+      if (!this.grounded) {
+        this.vy -= WORLD.gravity * dt;
+        this.pos.y += this.vy * dt;
+        if (this.pos.y <= 0) { this.pos.y = 0; this.vy = 0; this.grounded = true; }
+      }
+      const getUpFrac = this.knockdownTimer < 0.45 ? this.knockdownTimer / 0.45 : 1.0;
+      this.mesh.position.set(this.pos.x, this.pos.y + 0.18 * getUpFrac, this.pos.z);
+      this.mesh.rotation.y = this.yaw;
+      this.mesh.rotation.x = (-Math.PI * 0.48) * getUpFrac;
+      return;
     }
+    this.mesh.rotation.x = 0;
+
+    const { forward, right } = input.getMoveAxes();
+    const wantsMove = forward !== 0 || right !== 0;
+    const wantsSprint = (input.isDown('ShiftLeft') || input.isDown('ShiftRight')) && wantsMove;
+
+    // Stamina & Exhaustion ("ngos-ngosan") system
+    let sprinting = false;
+    if (state) {
+      if (state.exhausted) {
+        state.exhaustTimer = Math.max(0, state.exhaustTimer - dt);
+        state.stamina = Math.min(state.maxStamina, state.stamina + dt * 10.5);
+        this.pantCooldown -= dt;
+        if (this.pantCooldown <= 0) {
+          this.pantCooldown = 0.88;
+          if (audio) audio.playPantBreath();
+        }
+        if (state.exhaustTimer <= 0 && state.stamina >= 30) {
+          state.exhausted = false;
+        }
+      } else if (wantsSprint && state.stamina > 0) {
+        sprinting = true;
+        state.stamina = Math.max(0, state.stamina - dt * 18.0);
+        if (state.stamina <= 0) {
+          state.exhausted = true;
+          state.exhaustTimer = 3.5;
+          this.pantCooldown = 0.05;
+        }
+      } else {
+        const recRate = wantsMove ? 11.5 : 19.0;
+        state.stamina = Math.min(state.maxStamina, state.stamina + dt * recRate);
+      }
+    } else {
+      sprinting = wantsSprint;
+    }
+
+    // Natural physical water boundary (shallow surf slows; deep water smoothly swims & pushes back toward shore)
+    const waterDepth = this.collisionWorld ? this.collisionWorld.getWaterDepth(this.pos.x, this.pos.z) : 0;
+    const inDeepWater = waterDepth >= 1.05;
+    const inShallowWater = waterDepth > 0.05 && !inDeepWater;
+
+    // Realistic human speeds: walk 2.0 m/s, sprint 5.6 m/s, exhausted 1.35 m/s
+    let speed = state?.exhausted ? 1.35 : sprinting ? 5.6 : 2.0;
+    if (inShallowWater) speed *= 0.56;
+    else if (inDeepWater) speed = 1.9;
 
     const moveYaw = cameraYaw ?? this.yaw;
     let mx = 0;
     let mz = 0;
-    if (forward !== 0 || right !== 0) {
+    if (wantsMove) {
       const fwdX = Math.sin(moveYaw);
       const fwdZ = Math.cos(moveYaw);
       const rtX = -Math.cos(moveYaw);
@@ -617,33 +800,34 @@ export class PlayerController {
       const len = Math.hypot(mx, mz) || 1;
       mx = (mx / len) * speed;
       mz = (mz / len) * speed;
-      if (!input.rightMouseDown) {
+      if (!input.rightMouseDown && !input.mouseDown) {
         this.yaw = Math.atan2(mx, mz);
       }
     }
 
-    this.pos.x = Math.max(-440, Math.min(440, this.pos.x + mx * dt));
-    this.pos.z = Math.max(-430, Math.min(280, this.pos.z + mz * dt));
-
-    // Building collision
-    const r = 0.65;
-    for (const c of this.colliders) {
-      if (this.pos.x + r > c.minX && this.pos.x - r < c.maxX &&
-          this.pos.z + r > c.minZ && this.pos.z - r < c.maxZ) {
-        const dxL = Math.abs(this.pos.x + r - c.minX);
-        const dxR = Math.abs(c.maxX - (this.pos.x - r));
-        const dzT = Math.abs(this.pos.z + r - c.minZ);
-        const dzB = Math.abs(c.maxZ - (this.pos.z - r));
-        const m = Math.min(dxL, dxR, dzT, dzB);
-        if (m === dxL) this.pos.x = c.minX - r;
-        else if (m === dxR) this.pos.x = c.maxX + r;
-        else if (m === dzT) this.pos.z = c.minZ - r;
-        else this.pos.z = c.maxZ + r;
-      }
+    // Smooth coastal return current if swimming too far out into deep ocean
+    if (inDeepWater && this.collisionWorld) {
+      const ret = this.collisionWorld.getShoreReturnVector(this.pos.x, this.pos.z);
+      const push = Math.min(3.4, (waterDepth - 0.9) * 2.2);
+      mx += ret.x * push;
+      mz += ret.z * push;
     }
 
-    if (this.grounded && input.consumePress('Space')) {
-      this.vy = 10.5;
+    // Aiming faces camera yaw smoothly
+    if (input.mouseDown || input.rightMouseDown || (state?.reloadTimer > 0)) {
+      this.yaw = moveYaw;
+    }
+
+    this.vel.set(mx, 0, mz);
+    if (this.collisionWorld) {
+      this.collisionWorld.moveAndSlide(this.pos, this.vel, 0.62, dt, { bounce: 0 });
+    } else {
+      this.pos.x += mx * dt;
+      this.pos.z += mz * dt;
+    }
+
+    if (this.grounded && !inDeepWater && input.consumePress('Space')) {
+      this.vy = 9.2;
       this.grounded = false;
     }
     if (!this.grounded) {
@@ -656,19 +840,42 @@ export class PlayerController {
       }
     }
 
-    this.mesh.position.copy(this.pos);
+    // Sink subtly when wading/swimming in water
+    const waterSink = inDeepWater ? -0.68 : inShallowWater ? -waterDepth * 0.35 : 0;
+    this.mesh.position.set(this.pos.x, this.pos.y + waterSink, this.pos.z);
     this.mesh.rotation.y = this.yaw;
 
-    const moving = Math.hypot(mx, mz) > 0.4;
+    const actualSpd = Math.hypot(mx, mz);
+    const moving = actualSpd > 0.25;
     if (moving) {
-      poseHumanStride(this.mesh, elapsed * (sprint ? 11.5 : 8.2), false);
+      this.stridePhase += dt * (sprinting ? 13.0 : state?.exhausted ? 4.8 : 6.4);
+    }
+
+    // Distinct Pose Priority: Deep Water Swim -> Exhausted -> Sprint -> Walk -> Idle -> Combat/Reload -> Flinch
+    if (inDeepWater) {
+      poseHumanSwim(this.mesh, elapsed);
+    } else if (state?.exhausted) {
+      poseHumanExhausted(this.mesh, elapsed, moving, this.stridePhase);
+    } else if (sprinting && moving) {
+      poseHumanSprint(this.mesh, this.stridePhase);
+    } else if (moving) {
+      poseHumanStride(this.mesh, this.stridePhase, false);
     } else {
       poseHumanStride(this.mesh, 0, false);
     }
-    if (input.mouseDown || input.rightMouseDown || this.muzzleTimer > 0) {
+
+    // Reload 3D arm animation overrides upper-body arms cleanly
+    if (state && state.reloadTimer > 0 && state.reloadDuration > 0) {
+      const prog = 1 - state.reloadTimer / state.reloadDuration;
+      poseHumanReload(this.mesh, prog);
+    } else if (!inDeepWater && (input.mouseDown || input.rightMouseDown || this.muzzleTimer > 0)) {
       this.setCombatPose(true);
     } else {
       this.aiming = false;
+    }
+
+    if (this.flinchTimer > 0) {
+      poseHumanFlinch(this.mesh, this.flinchTimer / 0.24);
     }
 
     if (this.muzzleTimer > 0) {

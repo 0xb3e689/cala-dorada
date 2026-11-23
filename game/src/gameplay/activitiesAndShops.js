@@ -1,7 +1,7 @@
-// Street races, stunt jump scoring, Golden Shell collectibles, 8 city properties, plus 5 new interactive systems: Car Modding, Character Wardrobe, Fishing, Gardening, and Barrio Viejo Roof Tile Repair.
+// Street races, Golden Shell collectibles, 8 city properties, plus 5 interactive systems: Car Modding, Character Wardrobe, Fishing, Gardening, and Barrio Viejo Roof Tile Repair.
 
 import * as THREE from '../../vendor/three.module.min.js';
-import { STREET_RACES, STUNT_RAMPS, GOLDEN_SHELLS, FISHING_SPOTS, GARDEN_SITES, ROOF_REPAIR_SITES } from '../world/cityPlan.js';
+import { STREET_RACES, GOLDEN_SHELLS, FISHING_SPOTS, GARDEN_SITES, ROOF_REPAIR_SITES } from '../world/cityPlan.js';
 import { WEAPONS, PROPERTIES, FISH_SPECIES, GARDEN_CROPS } from '../core/config.js';
 import { getEmpireIncomePerHour } from '../core/gameState.js';
 import { createVehicleMesh, applyVehicleMods } from '../entities/vehicleFactory.js';
@@ -114,22 +114,8 @@ export class ActivitiesAndShops {
     }
   }
 
-  onStuntLand(rampId, dist, state, audio) {
-    const ramp = STUNT_RAMPS.find((r) => r.id === rampId);
-    if (!ramp) return;
-    const meters = Math.round(dist);
-    if (meters >= 16) {
-      const firstTime = !state.completedStunts.has(ramp.id);
-      state.completedStunts.add(ramp.id);
-      state.careerStats.stuntsLanded += 1;
-      const bonus = firstTime ? 2500 : 600;
-      state.cash += bonus;
-      state.careerStats.cashEarned += bonus;
-      state.rp += firstTime ? 180 : 50;
-      state.toast = { text: `STUNT JUMP · ${meters}m · +$${bonus.toLocaleString()}`, timer: 3.6 };
-      if (audio) audio.playUiBeep(820);
-    }
-  }
+  // (Mid-street stunt ramps removed for realistic city streets)
+  onStuntLand() {}
 
   update(dt, elapsed, state, playerPos, worldAnim, audio) {
     // 0. Passive Empire Income

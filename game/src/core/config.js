@@ -79,48 +79,48 @@ export const DISTRICTS = [
 export const VEHICLES = {
   apex_gt: {
     id: 'apex_gt', name: 'Dorado Apex GT', cls: 'SUPER',
-    maxSpeed: 64, accel: 38, brake: 48, turnRate: 2.35, driftGrip: 0.91,
-    maxHp: 140, color: 0xff6138, accent: 0xffc857, length: 4.9, width: 2.25, height: 1.28,
+    maxSpeed: 71.5, accel: 34, brake: 52, turnRate: 2.38, driftGrip: 0.90,
+    maxHp: 150, color: 0xff6138, accent: 0xffc857, length: 4.9, width: 2.25, height: 1.28,
   },
   cabo_gt: {
     id: 'cabo_gt', name: 'Cabo GT Coupe', cls: 'SPORTS',
-    maxSpeed: 54, accel: 31, brake: 42, turnRate: 2.25, driftGrip: 0.90,
-    maxHp: 120, color: 0x2ec4b6, accent: 0xf4f6f9, length: 4.6, width: 2.1, height: 1.35,
+    maxSpeed: 62.6, accel: 29, brake: 46, turnRate: 2.28, driftGrip: 0.89,
+    maxHp: 130, color: 0x2ec4b6, accent: 0xf4f6f9, length: 4.6, width: 2.1, height: 1.35,
   },
   convertible: {
     id: 'convertible', name: 'Solsticio Roadster', cls: 'CABRIO',
-    maxSpeed: 52, accel: 30, brake: 41, turnRate: 2.32, driftGrip: 0.90,
-    maxHp: 112, color: 0xff5e7e, accent: 0xfff0d4, length: 4.55, width: 2.08, height: 1.18, isConvertible: true,
+    maxSpeed: 59.0, accel: 28, brake: 44, turnRate: 2.34, driftGrip: 0.89,
+    maxHp: 120, color: 0xff5e7e, accent: 0xfff0d4, length: 4.55, width: 2.08, height: 1.18, isConvertible: true,
   },
   baja_runner: {
     id: 'baja_runner', name: 'Baja Runner SUV', cls: 'UTILITY',
-    maxSpeed: 44, accel: 25, brake: 36, turnRate: 1.95, driftGrip: 0.87,
-    maxHp: 185, color: 0xd9a05b, accent: 0x222733, length: 5.0, width: 2.35, height: 1.85,
+    maxSpeed: 40.2, accel: 22, brake: 38, turnRate: 1.92, driftGrip: 0.86,
+    maxHp: 195, color: 0xd9a05b, accent: 0x222733, length: 5.0, width: 2.35, height: 1.85,
   },
   scooter: {
     id: 'scooter', name: 'Coastal Scooter', cls: 'MOTO',
-    maxSpeed: 38, accel: 28, brake: 38, turnRate: 2.9, driftGrip: 0.86,
+    maxSpeed: 18.0, accel: 16, brake: 28, turnRate: 2.85, driftGrip: 0.85,
     maxHp: 75, color: 0x39d5ff, accent: 0xffffff, length: 2.2, width: 0.85, height: 1.15,
   },
   cdpd_interceptor: {
     id: 'cdpd_interceptor', name: 'CDPD Interceptor', cls: 'PURSUIT',
-    maxSpeed: 58, accel: 34, brake: 44, turnRate: 2.3, driftGrip: 0.9,
-    maxHp: 135, color: 0x162238, accent: 0xf5f8ff, length: 4.95, width: 2.2, height: 1.48, isPolice: true,
+    maxSpeed: 53.6, accel: 30, brake: 46, turnRate: 2.30, driftGrip: 0.89,
+    maxHp: 140, color: 0x162238, accent: 0xf5f8ff, length: 4.95, width: 2.2, height: 1.48, isPolice: true,
   },
   cdpd_enforcer: {
     id: 'cdpd_enforcer', name: 'CDPD Enforcer SWAT', cls: 'TACTICAL',
-    maxSpeed: 42, accel: 22, brake: 34, turnRate: 1.65, driftGrip: 0.85,
+    maxSpeed: 36.6, accel: 19, brake: 34, turnRate: 1.65, driftGrip: 0.84,
     maxHp: 260, color: 0x1c2536, accent: 0x3d557d, length: 6.2, width: 2.6, height: 2.55, isPolice: true, isSwat: true,
   },
 };
 
 export const WEAPONS = [
-  { id: 'fists', slot: 1, name: 'Fists', shortName: 'Fists', damage: 18, fireRate: 0.42, range: 3.2, spread: 0, clip: 0, reserve: 0, melee: true },
-  { id: 'bat', slot: 2, name: 'Alloy Bat', shortName: 'Bat', damage: 34, fireRate: 0.55, range: 3.8, spread: 0, clip: 0, reserve: 0, melee: true },
-  { id: 'pistol', slot: 3, name: 'Sol 9mm', shortName: '9mm', damage: 24, fireRate: 0.25, range: 58, spread: 0.02, clip: 15, reserve: 120 },
-  { id: 'smg', slot: 4, name: 'Vector SMG', shortName: 'Vector', damage: 18, fireRate: 0.095, range: 52, spread: 0.045, clip: 32, reserve: 192, auto: true },
-  { id: 'shotgun', slot: 5, name: 'Breacher 12G', shortName: '12G', damage: 16, pellets: 6, fireRate: 0.72, range: 28, spread: 0.11, clip: 8, reserve: 48 },
-  { id: 'carbine', slot: 6, name: 'Carbine AR', shortName: 'Carbine', damage: 29, fireRate: 0.13, range: 76, spread: 0.025, clip: 30, reserve: 180, auto: true },
+  { id: 'fists', slot: 1, name: 'Fists', shortName: 'Fists', damage: 18, fireRate: 0.42, range: 3.2, spread: 0, clip: 0, reserve: 0, reloadTime: 0, melee: true },
+  { id: 'bat', slot: 2, name: 'Alloy Bat', shortName: 'Bat', damage: 34, fireRate: 0.55, range: 3.8, spread: 0, clip: 0, reserve: 0, reloadTime: 0, melee: true },
+  { id: 'pistol', slot: 3, name: 'Sol 9mm', shortName: '9mm', damage: 24, fireRate: 0.25, range: 58, spread: 0.02, clip: 15, reserve: 120, reloadTime: 1.5 },
+  { id: 'smg', slot: 4, name: 'Vector SMG', shortName: 'Vector', damage: 18, fireRate: 0.095, range: 52, spread: 0.045, clip: 32, reserve: 192, reloadTime: 1.68, auto: true },
+  { id: 'shotgun', slot: 5, name: 'Breacher 12G', shortName: '12G', damage: 16, pellets: 6, fireRate: 0.72, range: 28, spread: 0.11, clip: 8, reserve: 48, reloadTime: 1.9 },
+  { id: 'carbine', slot: 6, name: 'Carbine AR', shortName: 'Carbine', damage: 29, fireRate: 0.13, range: 76, spread: 0.025, clip: 30, reserve: 180, reloadTime: 1.78, auto: true },
 ];
 
 export const CAR_PAINTS = [

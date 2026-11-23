@@ -1,13 +1,15 @@
-// High-density living city traffic (coupes, SUVs, convertibles, coastal scooters) and diverse reactive NPCs (beachgoers, joggers, tourists, market vendors, commuters, enforcers, CDPD officers).
+// High-density living city traffic and reactive NPCs with solid building collisions,
+// realistic panicked human running speeds (3.8-4.6 m/s), vehicle-hit knockdowns, and bullet hit reactions.
 
 import * as THREE from '../../vendor/three.module.min.js';
 import { ROAD_X, ROAD_Z } from './cityPlan.js';
 import { createVehicleMesh } from '../entities/vehicleFactory.js';
-import { buildCharacterMesh, poseHumanStride } from '../entities/playerController.js';
+import { buildCharacterMesh, poseHumanStride, poseHumanFlinch } from '../entities/playerController.js';
 
 export class TrafficAndPeds {
-  constructor(scene) {
+  constructor(scene, collisionWorld = null) {
     this.scene = scene;
+    this.collisionWorld = collisionWorld;
     this.cars = [];
     this.peds = [];
     this.group = new THREE.Group();
@@ -25,7 +27,6 @@ export class TrafficAndPeds {
     ];
     let idx = 0;
 
-    // Dense Horizontal Road Cruisers (especially lively on Paseo Dorado z=200 & downtown avenues)
     for (const rz of ROAD_Z) {
       const count = rz === 200 ? 8 : rz === 120 || rz === 0 ? 6 : 4;
       for (let i = 0; i < count; i++) {
@@ -41,14 +42,14 @@ export class TrafficAndPeds {
         this.group.add(mesh);
         this.cars.push({
           mesh, type, axis: 'x', dir, laneCoord: z,
-          speed: type === 'scooter' ? 12.5 : 15.5 + (idx % 5) * 2.4,
+          speed: type === 'scooter' ? 11.5 : 14.5 + (idx % 5) * 2.2,
+          curSpeed: type === 'scooter' ? 11.5 : 14.5,
           min: -355, max: 355,
         });
         idx++;
       }
     }
 
-    // Dense Vertical Road Cruisers
     for (const rx of ROAD_X) {
       const count = Math.abs(rx) <= 180 ? 5 : 4;
       for (let i = 0; i < count; i++) {
@@ -63,7 +64,8 @@ export class TrafficAndPeds {
         this.group.add(mesh);
         this.cars.push({
           mesh, type, axis: 'z', dir, laneCoord: x,
-          speed: type === 'scooter' ? 12 : 14.5 + (idx % 4) * 2.5,
+          speed: type === 'scooter' ? 11.0 : 13.5 + (idx % 4) * 2.2,
+          curSpeed: type === 'scooter' ? 11.0 : 13.5,
           min: -345, max: 205,
         });
         idx++;
@@ -75,7 +77,6 @@ export class TrafficAndPeds {
     const brightColors = [0xff6b4a, 0x34e0c8, 0xffbe55, 0x6c8cff, 0xf2f4f8, 0xff5992, 0x70e08b, 0xff9248, 0x5be3ff];
     const spawnList = [];
 
-    // 1. Sandy Beach Beachgoers & Tourists (Paseo Dorado west beach & Bahia Esmeralda east beach)
     for (let i = 0; i < 24; i++) {
       const onEast = i >= 16;
       const x = onEast ? 186 + (i - 16) * 22 : -320 + i * 22;
@@ -86,7 +87,6 @@ export class TrafficAndPeds {
       });
     }
 
-    // 2. Paseo Dorado Boardwalk Joggers, Tourists & CDPD Foot Officers
     for (let i = 0; i < 26; i++) {
       const onEast = i >= 19;
       const x = onEast ? 186 + (i - 19) * 23 : -325 + i * 19;
@@ -98,7 +98,6 @@ export class TrafficAndPeds {
       });
     }
 
-    // 3. Paseo Dorado North Sidewalk Commuters & Shoppers (outside Hotel Solsticio, Casa Ambar, Solsticio Club)
     for (let i = 0; i < 16; i++) {
       const x = -315 + i * 22;
       if (x > 28 && x < 185) continue;
@@ -106,7 +105,6 @@ export class TrafficAndPeds {
       spawnList.push({ x, z: 184 + (i % 2) * 2.2, axis: 'x', role, min: -330, max: 32 });
     }
 
-    // 4. Mercado Nocturno: 12 Street Vendors stationed behind all 12 stalls + 18 shoppers/enforcers/officers
     const mCx = -310;
     const mCz = -55;
     for (let i = 0; i < 6; i++) {
@@ -124,7 +122,6 @@ export class TrafficAndPeds {
       });
     }
 
-    // 5. Distrito Torre, Barrio Viejo & Puerto Cenit Commuters, Enforcers & CDPD Officers
     for (let i = 0; i < 20; i++) {
       const laneZ = i < 10 ? 14 : -14;
       const x = -170 + (i % 10) * 44;
@@ -141,30 +138,72 @@ export class TrafficAndPeds {
       this.group.add(ped);
       this.peds.push({
         mesh: ped,
+        pos: ped.position,
         role: sp.role,
         axis: sp.axis,
         dir: i % 2 === 0 ? 1 : -1,
         stationary: Boolean(sp.stationary),
         min: sp.min ?? -330,
         max: sp.max ?? 330,
-        baseSpeed: sp.role === 'jogger' ? 4.4 : sp.role === 'officer' ? 2.1 : 2.1 + (i % 3) * 0.42,
+        baseSpeed: sp.role === 'jogger' ? 3.5 : sp.role === 'officer' ? 1.9 : 1.7 + (i % 3) * 0.25,
+        fleeSpeed: 3.8 + (i % 5) * 0.2, // Strictly capped natural human running speed: 3.8 - 4.6 m/s!
+        hp: 65,
+        downed: false,
         panicTimer: 0,
         fleeYaw: 0,
+        flinchTimer: 0,
+        knockdownTimer: 0,
+        knockVel: new THREE.Vector3(),
         phase: i * 1.1,
       });
     });
   }
 
-  triggerPanicNear(pos, radius = 45) {
+  triggerPanicNear(pos, radius = 48) {
     for (const p of this.peds) {
-      if (p.role === 'vendor') continue;
+      if (p.role === 'vendor' || p.downed) continue;
       const dx = p.mesh.position.x - pos.x;
       const dz = p.mesh.position.z - pos.z;
       if (dx * dx + dz * dz < radius * radius) {
-        p.panicTimer = 6.0;
-        p.fleeYaw = Math.atan2(dx, dz);
+        p.panicTimer = 6.5;
+        p.fleeYaw = Math.atan2(dx, dz) + (Math.random() - 0.5) * 0.35;
       }
     }
+  }
+
+  applyPedShot(ped, dmg, dir) {
+    if (!ped || ped.downed) return;
+    ped.hp = Math.max(0, ped.hp - dmg);
+    ped.flinchTimer = 0.28;
+    ped.panicTimer = 7.0;
+    if (dir) {
+      ped.fleeYaw = Math.atan2(dir.x, dir.z);
+      ped.mesh.position.x += dir.x * 0.24;
+      ped.mesh.position.z += dir.z * 0.24;
+    }
+    if (ped.hp <= 0) {
+      ped.downed = true;
+      ped.mesh.rotation.x = -Math.PI / 2;
+      ped.mesh.position.y = 0.18;
+    }
+  }
+
+  applyPedVehicleImpact(ped, dirX, dirZ, speed) {
+    if (!ped || ped.downed) return false;
+    const force = Math.min(18, Math.max(5.5, speed * 0.72));
+    ped.knockVel.set(dirX * force, 0, dirZ * force);
+    ped.knockdownTimer = 1.65;
+    ped.flinchTimer = 0.32;
+    ped.panicTimer = 7.0;
+    ped.fleeYaw = Math.atan2(dirX, dirZ);
+    const dmg = Math.round(speed * 2.5);
+    ped.hp = Math.max(0, ped.hp - dmg);
+    if (ped.hp <= 0) {
+      ped.downed = true;
+      ped.mesh.rotation.x = -Math.PI / 2;
+      ped.mesh.position.y = 0.18;
+    }
+    return true;
   }
 
   update(dt, elapsed, playerPos, panicActive) {
@@ -172,8 +211,9 @@ export class TrafficAndPeds {
     for (const c of this.cars) {
       const dx = c.mesh.position.x - playerPos.x;
       const dz = c.mesh.position.z - playerPos.z;
-      const nearPlayer = dx * dx + dz * dz < 110;
-      const spd = nearPlayer ? c.speed * 0.25 : c.speed;
+      const nearPlayer = dx * dx + dz * dz < 85;
+      const spd = nearPlayer ? c.speed * 0.32 : c.speed;
+      c.curSpeed = spd;
 
       if (c.axis === 'x') {
         c.mesh.position.x += c.dir * spd * dt;
@@ -189,25 +229,52 @@ export class TrafficAndPeds {
       }
     }
 
+    const tmpVel = new THREE.Vector3();
+
     // Update pedestrians
     for (const p of this.peds) {
+      if (p.downed) continue;
+      if (p.flinchTimer > 0) p.flinchTimer = Math.max(0, p.flinchTimer - dt);
+
+      // Car-hit tumble/knockdown & smooth get-up recovery
+      if (p.knockdownTimer > 0) {
+        p.knockdownTimer = Math.max(0, p.knockdownTimer - dt);
+        p.knockVel.multiplyScalar(Math.pow(0.08, dt));
+        if (this.collisionWorld) this.collisionWorld.moveAndSlide(p.mesh.position, p.knockVel, 0.5, dt);
+        else { p.mesh.position.x += p.knockVel.x * dt; p.mesh.position.z += p.knockVel.z * dt; }
+        const f = p.knockdownTimer < 0.45 ? p.knockdownTimer / 0.45 : 1.0;
+        p.mesh.position.y = 0.18 * f;
+        p.mesh.rotation.x = -Math.PI * 0.48 * f;
+        continue;
+      }
+      p.mesh.rotation.x = 0;
+      p.mesh.position.y = 0;
+
       if (panicActive && p.role !== 'vendor') {
         const d2 = (p.mesh.position.x - playerPos.x) ** 2 + (p.mesh.position.z - playerPos.z) ** 2;
         if (d2 < 900 && p.panicTimer <= 0) {
-          p.panicTimer = 4.5;
+          p.panicTimer = 5.0;
           p.fleeYaw = Math.atan2(p.mesh.position.x - playerPos.x, p.mesh.position.z - playerPos.z);
         }
       }
 
       if (p.panicTimer > 0) {
         p.panicTimer -= dt;
-        const spd = 6.2;
-        p.mesh.position.x += Math.sin(p.fleeYaw) * spd * dt;
-        p.mesh.position.z += Math.cos(p.fleeYaw) * spd * dt;
+        const spd = p.fleeSpeed; // Strictly 3.8 - 4.6 m/s!
+        tmpVel.set(Math.sin(p.fleeYaw) * spd, 0, Math.cos(p.fleeYaw) * spd);
+        if (this.collisionWorld) {
+          const hit = this.collisionWorld.moveAndSlide(p.mesh.position, tmpVel, 0.5, dt);
+          if (hit.hit) p.fleeYaw += 1.2;
+          if (this.collisionWorld.getWaterDepth(p.mesh.position.x, p.mesh.position.z) > 0.4) {
+            p.fleeYaw = Math.PI; // Turn away from ocean
+          }
+        } else {
+          p.mesh.position.x += tmpVel.x * dt;
+          p.mesh.position.z += tmpVel.z * dt;
+        }
         p.mesh.rotation.y = p.fleeYaw;
-        animatePedLimbs(p.mesh, elapsed * 13 + p.phase, true);
+        animatePedLimbs(p.mesh, elapsed * 10.2 + p.phase, true);
       } else if (p.stationary) {
-        // Gentle idle arm gesture for vendors & relaxing beachgoers
         const l = p.mesh.userData.limbs;
         if (l) {
           l.armR.rotation.x = Math.sin(elapsed * 2.2 + p.phase) * 0.16;
@@ -216,15 +283,31 @@ export class TrafficAndPeds {
       } else {
         const spd = p.baseSpeed;
         if (p.axis === 'x') {
-          p.mesh.position.x += p.dir * spd * dt;
+          tmpVel.set(p.dir * spd, 0, 0);
           p.mesh.rotation.y = p.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+          if (this.collisionWorld) {
+            const hit = this.collisionWorld.moveAndSlide(p.mesh.position, tmpVel, 0.5, dt);
+            if (hit.hit) p.dir *= -1;
+          } else {
+            p.mesh.position.x += tmpVel.x * dt;
+          }
           if (p.mesh.position.x > p.max || p.mesh.position.x < p.min) p.dir *= -1;
         } else {
-          p.mesh.position.z += p.dir * spd * dt;
+          tmpVel.set(0, 0, p.dir * spd);
           p.mesh.rotation.y = p.dir > 0 ? 0 : Math.PI;
+          if (this.collisionWorld) {
+            const hit = this.collisionWorld.moveAndSlide(p.mesh.position, tmpVel, 0.5, dt);
+            if (hit.hit) p.dir *= -1;
+          } else {
+            p.mesh.position.z += tmpVel.z * dt;
+          }
           if (p.mesh.position.z > p.max || p.mesh.position.z < p.min) p.dir *= -1;
         }
-        animatePedLimbs(p.mesh, elapsed * (p.role === 'jogger' ? 9.5 : 5.5) + p.phase, false);
+        animatePedLimbs(p.mesh, elapsed * (p.role === 'jogger' ? 8.8 : 5.2) + p.phase, false);
+      }
+
+      if (p.flinchTimer > 0) {
+        poseHumanFlinch(p.mesh, p.flinchTimer / 0.28);
       }
     }
   }

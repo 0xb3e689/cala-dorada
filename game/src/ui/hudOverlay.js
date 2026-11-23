@@ -1,14 +1,14 @@
-// Clean AAA dark-glass HUD overlay: mission card, CDPD dispatch board, wanted stars, single active weapon badge, CS:GO-style radial weapon wheel, crew HP bars, minimap, dialogue, radio, speedometer & activity mini-game bar.
+// Pure GTA-style minimal HUD overlay: NO CDPD DISPATCH, plain 5 wanted stars (zero text),
+// single active weapon badge with reload progress & ∞ for melee, CS:GO radial weapon wheel,
+// Health / Armor / Stamina bars, WASTED / BUSTED overlay, damage flash, bail-out alert, and clean driving speedometer.
 
 import * as THREE from '../../vendor/three.module.min.js';
-import { DISTRICTS, WEAPONS, CREW, RADIO_STATIONS } from '../core/config.js';
-import { getRankInfo, getStandingTier, formatTimeClock } from '../core/gameState.js';
+import { WEAPONS, CREW, RADIO_STATIONS } from '../core/config.js';
 import { renderPortraitSvg } from './portraitArt.js';
 import { MinimapRenderer } from './minimapRenderer.js';
 
 const _projVec = new THREE.Vector3();
 
-// Crisp custom SVG weapon silhouettes (used in both Single Active Weapon Badge & CS:GO Radial Weapon Wheel)
 export function renderWeaponSvg(id) {
   switch (id) {
     case 'fists':
@@ -59,21 +59,22 @@ export class HudOverlay {
     this.cb = callbacks;
     this.root = document.getElementById('hud-root');
     this.combatLayer = document.getElementById('combat-world-layer');
+    this.damageFlashEl = document.getElementById('damage-flash');
+    this.statusOverlayEl = document.getElementById('status-overlay');
     this.reticle = document.getElementById('reticle');
+    this.reloadSvg = document.getElementById('reticle-reload-svg');
+    this.reloadArc = document.getElementById('reticle-reload-arc');
     this.wheelEl = document.getElementById('weapon-wheel');
     this.missionEl = document.getElementById('mission-card');
-    this.dispatchEl = document.getElementById('dispatch-board');
     this.statusEl = document.getElementById('status-strip');
     this.wantedEl = document.getElementById('wanted-panel');
-    this.rankEl = document.getElementById('rank-card');
     this.weaponEl = document.getElementById('weapon-bar');
     this.crewEl = document.getElementById('crew-bar');
-    this.districtEl = document.getElementById('district-card');
-    this.gpsPillEl = document.getElementById('minimap-gps-pill');
     this.vitalsEl = document.getElementById('vitals-bar');
     this.dialogueEl = document.getElementById('dialogue-box');
     this.radioEl = document.getElementById('radio-ticker');
     this.vehicleEl = document.getElementById('vehicle-hud');
+    this.bailoutEl = document.getElementById('bailout-banner');
     this.toastEl = document.getElementById('banner-toast');
     this.promptEl = document.getElementById('interact-prompt');
     this.activityEl = document.getElementById('activity-hud');
@@ -89,13 +90,15 @@ export class HudOverlay {
     if (!vis) {
       this.reticle.classList.add('hidden');
       if (this.wheelEl) this.wheelEl.classList.add('hidden');
+      if (this.statusOverlayEl) this.statusOverlayEl.classList.add('hidden');
+      if (this.damageFlashEl) this.damageFlashEl.classList.add('hidden');
     }
   }
 
-  // Render genuine CS:GO-style 6-wedge circular radial weapon selector
+  // CS:GO-style 6-wedge circular radial weapon selector (∞ symbol for melee)
   renderWeaponWheel(state, shotRight = false) {
     if (!this.wheelEl) return;
-    if (state.mode !== 'playing' || !state.weaponWheelOpen) {
+    if (state.mode !== 'playing' || !state.weaponWheelOpen || state.statusOverlay) {
       this.wheelEl.classList.add('hidden');
       this.wheelEl.classList.remove('shot-right');
       return;
@@ -175,10 +178,10 @@ export class HudOverlay {
     });
   }
 
-  // Project 3D enemy threat markers, enemy HP bars, hit-confirm crosshair & floating weapon damage numbers every frame
+  // World-space projected enemy threat markers, HP bars, hit-confirm crosshair, reload ring & weapon damage popups
   updateCombatOverlay({ state, camera, enemies, damagePopups, hitConfirmTimer, hitConfirmCrit }) {
     if (!this.combatLayer) return;
-    if (state.mode !== 'playing') {
+    if (state.mode !== 'playing' || state.statusOverlay) {
       this.combatLayer.classList.add('hidden');
       this.combatLayer.innerHTML = '';
       this.reticle.classList.remove('hit-confirm', 'hit-crit');
@@ -189,11 +192,21 @@ export class HudOverlay {
     this.reticle.classList.toggle('hit-confirm', showHit);
     this.reticle.classList.toggle('hit-crit', showHit && Boolean(hitConfirmCrit));
 
+    // Subtle reload progress ring around crosshair
+    if (this.reloadSvg && this.reloadArc) {
+      const reloading = !state.inVehicle && state.reloadTimer > 0 && state.reloadDuration > 0;
+      this.reloadSvg.classList.toggle('hidden', !reloading);
+      if (reloading) {
+        const prog = 1 - state.reloadTimer / state.reloadDuration;
+        const circ = 106.8;
+        this.reloadArc.setAttribute('stroke-dashoffset', String((circ * (1 - prog)).toFixed(1)));
+      }
+    }
+
     const W = window.innerWidth;
     const H = window.innerHeight;
     let html = '';
 
-    // 1. Overhead Threat Markers & HP Bars for attacking enemies
     for (const e of enemies ?? []) {
       if (e.downed || !e.attacking) continue;
       _projVec.set(e.pos.x, e.pos.y + 2.08, e.pos.z);
@@ -216,7 +229,6 @@ export class HudOverlay {
       </div>`;
     }
 
-    // 2. Floating Weapon & Melee Damage Numbers (NEVER for vehicle ramming!)
     for (const p of damagePopups ?? []) {
       if (p.source === 'vehicle') continue;
       _projVec.copy(p.pos);
@@ -235,22 +247,48 @@ export class HudOverlay {
   }
 
   update(ctx) {
-    const { state, mission, stage, dispatch, playerVehicle, playerPos, playerYaw, policeUnits, heliPos, enemies, promptText, activities, elapsed, wheelShotRight } = ctx;
+    const {
+      state, mission, stage, playerVehicle, playerPos, playerYaw,
+      policeUnits, footOfficers, heliPos, enemies, promptText, activities, elapsed, wheelShotRight,
+    } = ctx;
+
     if (state.mode !== 'playing') {
       this.setVisible(false);
       return;
     }
     this.setVisible(true);
-    this.reticle.classList.toggle('hidden', state.inVehicle || Boolean(activities?.fishingSession) || Boolean(activities?.roofSession));
+
+    // Fullscreen GTA WASTED / BUSTED Overlay
+    if (this.statusOverlayEl) {
+      if (state.statusOverlay) {
+        const t = state.statusOverlay.type;
+        this.statusOverlayEl.classList.remove('hidden');
+        this.statusOverlayEl.innerHTML = `<div class="status-banner"><div class="status-word ${t.toLowerCase()}">${t}</div></div>`;
+      } else {
+        this.statusOverlayEl.classList.add('hidden');
+      }
+    }
+
+    // Red Screen-Edge Damage Flash
+    if (this.damageFlashEl) {
+      const df = state.damageFlash ?? 0;
+      this.damageFlashEl.classList.toggle('hidden', df <= 0.02);
+      if (df > 0.02) this.damageFlashEl.style.opacity = String(Math.min(1, df).toFixed(2));
+    }
+
+    this.reticle.classList.toggle(
+      'hidden',
+      state.inVehicle || Boolean(state.statusOverlay) || Boolean(activities?.fishingSession) || Boolean(activities?.roofSession)
+    );
     this.renderWeaponWheel(state, Boolean(wheelShotRight));
 
     // Minimap renders every frame
     this.minimap.render({
-      state, playerPos, playerYaw, policeUnits, heliPos, enemies,
+      state, playerPos, playerYaw, policeUnits, footOfficers, heliPos, enemies,
       missionTarget: stage?.target ?? null, elapsed,
     });
 
-    // Live Fishing / Roof Tile Repair Mini-Game Bar (updates every frame for silky cursor)
+    // Live Fishing / Roof Repair Mini-Game Bar
     if (this.activityEl) {
       if (activities?.fishingSession) {
         const fs = activities.fishingSession;
@@ -260,16 +298,16 @@ export class HudOverlay {
         const curL = Math.round(fs.cursor * 100);
         this.activityEl.innerHTML = `
           <div class="act-hdr">
-            <span>FISHING · ${fs.spot.name.toUpperCase()}</span>
-            <span>${fs.phase === 'wait' ? 'CASTING...' : `${fs.progress}/3 REEL`}</span>
+            <span>FISHING</span>
+            <span>${fs.phase === 'wait' ? 'CASTING...' : `${fs.progress}/3`}</span>
           </div>
           <div class="act-track">
             <div class="act-zone" style="left:${zoneL}%;width:${zoneW}%"></div>
             <div class="act-cursor" style="left:${curL}%"></div>
           </div>
           <div class="act-foot">
-            <span>${fs.phase === 'wait' ? 'Watch the bobber...' : `Bite: ${fs.targetFish.name}!`}</span>
-            <button class="btn-xs alt" id="btn-act-strike">${fs.phase === 'wait' ? 'WAITING' : 'REEL [SPACE]'}</button>
+            <span>${fs.phase === 'wait' ? 'Watch the bobber...' : fs.targetFish.name}</span>
+            <button class="btn-xs alt" id="btn-act-strike">${fs.phase === 'wait' ? 'WAIT' : 'REEL [SPACE]'}</button>
           </div>`;
         const b = this.activityEl.querySelector('#btn-act-strike');
         if (b && this.cb.onActivityStrike) b.onclick = () => this.cb.onActivityStrike();
@@ -282,15 +320,15 @@ export class HudOverlay {
         const curL = Math.round(rs.cursor * 100);
         this.activityEl.innerHTML = `
           <div class="act-hdr">
-            <span>ROOF REPAIR · ${rs.site.name.toUpperCase()}</span>
-            <span>${done}/${rs.site.totalTiles} TILES</span>
+            <span>ROOF REPAIR</span>
+            <span>${done}/${rs.site.totalTiles}</span>
           </div>
           <div class="act-track">
             <div class="act-zone" style="left:${zoneL}%;width:${zoneW}%"></div>
             <div class="act-cursor" style="left:${curL}%"></div>
           </div>
           <div class="act-foot">
-            <span>Align terracotta tile in zone</span>
+            <span>Align tile in green zone</span>
             <button class="btn-xs" id="btn-act-strike">HAMMER [SPACE]</button>
           </div>`;
         const b = this.activityEl.querySelector('#btn-act-strike');
@@ -300,139 +338,100 @@ export class HudOverlay {
       }
     }
 
-    // DOM updates throttled (~15Hz) unless forced
+    // BAIL OUT! alert when car catches fire during 5-second humane countdown
+    if (this.bailoutEl) {
+      const showBail = Boolean(state.inVehicle && playerVehicle?.burning && !playerVehicle.exploded);
+      this.bailoutEl.classList.toggle('hidden', !showBail);
+      if (showBail) {
+        this.bailoutEl.textContent = `BAIL OUT! (${Math.ceil(playerVehicle.fireCountdown)}s)`;
+      }
+    }
+
+    // Throttle remaining DOM updates (~15Hz) unless forced
     if (elapsed - this.lastRenderTime < 0.06 && !ctx.forceDom) return;
     this.lastRenderTime = elapsed;
 
-    // 1. Mission Card (Clean: title, stage pips, active objective, timer, payout — ZERO NEXT: line!)
+    // 1. Concise Mission Card ONLY during an active mission (Title + 1-line objective + timer — ZERO NEXT:, ZERO clutter!)
     if (mission && stage) {
+      this.missionEl.classList.remove('hidden');
       const mins = Math.floor(state.missionTimer / 60);
       const secs = String(Math.floor(state.missionTimer % 60)).padStart(2, '0');
-      const pips = mission.stages.map((_, i) =>
-        `<span class="stage-pip ${i < state.missionStageIdx ? 'done' : i === state.missionStageIdx ? 'active' : ''}"></span>`
-      ).join('');
       this.missionEl.innerHTML = `
-        <div class="mission-top">
-          <span>MISSION ${mission.number} · ${state.missionStageIdx + 1}/${mission.stages.length}</span>
+        <div class="mission-head">
+          <div class="mission-title">${mission.title}</div>
           <span class="mission-timer">${mins}:${secs}</span>
         </div>
-        <div class="mission-title">${mission.title}</div>
-        <div class="stage-pips">${pips}</div>
-        <div class="mission-obj">${stage.label}${stage.type === 'combat' && state.missionEnemiesRemaining > 0 ? ` (${state.missionEnemiesRemaining} left)` : ''}</div>
-        <div class="mission-footer">
-          <span class="mission-payout">$${mission.cash.toLocaleString()} · ${mission.rp} RP</span>
-        </div>`;
-    }
-
-    // 2. CDPD Tactical Dispatch Board (Unit rows ONLY — ZERO DISPATCH/chatter quote!)
-    if (dispatch && dispatch.active && dispatch.units.length > 0) {
-      this.dispatchEl.classList.remove('hidden');
-      const rowsHtml = dispatch.units.map((u) => {
-        const clsKey = u.tactic.split(' ')[0];
-        return `<div class="dispatch-row">
-          <span class="dispatch-callsign">${u.callsign}</span>
-          <span class="dispatch-dist">${u.distance}m</span>
-          <span class="tactic-pill tactic-${clsKey}">${u.tactic}</span>
-        </div>`;
-      }).join('');
-      this.dispatchEl.innerHTML = `
-        <div class="dispatch-hdr">
-          <span>CDPD DISPATCH</span>
-          <span class="dispatch-live"><span class="dispatch-dot"></span>${dispatch.units.length} UNITS</span>
-        </div>
-        <div class="dispatch-rows">${rowsHtml}</div>`;
+        <div class="mission-obj">${stage.label}${stage.type === 'combat' && state.missionEnemiesRemaining > 0 ? ` (${state.missionEnemiesRemaining})` : ''}</div>`;
     } else {
-      this.dispatchEl.classList.add('hidden');
+      this.missionEl.classList.add('hidden');
     }
 
-    // 3. Clock + Cash (Zero GOLDEN HOUR / NEON NIGHT clutter!)
-    const clk = formatTimeClock(state.timeOfDay);
-    this.statusEl.innerHTML = `
-      <span class="clock-time">${clk.text}</span>
-      <div class="cash-display">$${Math.round(state.cash).toLocaleString()}</div>`;
+    // 2. Top-Right Cash (Pure classic GTA green money)
+    this.statusEl.innerHTML = `<div class="cash-display">$${Math.round(state.cash).toLocaleString()}</div>`;
 
-    // 4. Wanted Stars (Clean — zero CLEAR · NO HEAT spam!)
+    // 3. Plain 5 Wanted Stars ONLY — ZERO text beside or under stars!
+    const flashRed = Math.sin(elapsed * 10) > 0;
     const starsHtml = [1, 2, 3, 4, 5].map((n) => {
       const lit = n <= state.wantedLevel;
-      const hot = lit && state.wantedLevel >= 4;
-      return `<span class="w-star ${lit ? 'lit' : ''} ${hot ? 'hot' : ''}">★</span>`;
+      let cls = '';
+      if (lit) {
+        if (state.wantedLevel >= 4) cls = flashRed ? 'flash-red' : 'flash-blue';
+        else cls = 'lit';
+      }
+      return `<span class="w-star ${cls}">★</span>`;
     }).join('');
-    const badge = state.signalJamTimer > 0
-      ? `<span class="air-badge" style="background:linear-gradient(90deg,#6c4ce0,#34e0c8)">JAMMED ${Math.ceil(state.signalJamTimer)}s</span>`
-      : state.airUnitDeployed
-        ? `<span class="air-badge">AIR UNIT</span>`
-        : state.wantedLevel > 0
-          ? `<span class="air-badge" style="background:rgba(255,59,92,0.55)">PURSUIT</span>`
-          : '';
-    this.wantedEl.innerHTML = `<div class="wanted-stars">${starsHtml}</div>${badge}`;
+    this.wantedEl.innerHTML = `<div class="wanted-stars">${starsHtml}</div>`;
 
-    // 5. Rank / RP Bar
-    const rInfo = getRankInfo(state.rp);
-    this.rankEl.innerHTML = `
-      <div class="rank-row">
-        <span class="rank-title">RANK ${rInfo.rank} · ${rInfo.title.toUpperCase()}</span>
-        <span class="rank-rp">${rInfo.rp.toLocaleString()} / ${rInfo.nextRp.toLocaleString()}</span>
-      </div>
-      <div class="bar-track"><div class="bar-fill" style="width:${Math.round(rInfo.progress * 100)}%;background:linear-gradient(90deg,#ff7846,#ffbe55)"></div></div>`;
-
-    // 6. Single Active Weapon HUD Badge (SVG silhouette + name + ammo with ∞ for melee)
+    // 4. Single Active Weapon Badge (SVG silhouette + name + ammo with ∞ for melee + minimal reload bar)
     const activeW = WEAPONS[state.activeWeaponIdx] ?? WEAPONS[0];
     const activeAmmo = state.weaponAmmo[activeW.id];
     const ammoHtml = activeW.melee
       ? `<span class="wa-inf">∞</span>`
       : `<span>${activeAmmo.clip}</span><span class="wa-ammo-res">/ ${activeAmmo.reserve}</span>`;
+    const reloadBar = (state.reloadTimer > 0 && state.reloadDuration > 0)
+      ? `<div class="wa-reload-track"><div class="wa-reload-fill" style="width:${Math.round((1 - state.reloadTimer / state.reloadDuration) * 100)}%"></div></div>`
+      : '';
     this.weaponEl.innerHTML = `
-      <div class="wa-left">
-        <div class="wa-icon">${renderWeaponSvg(activeW.id)}</div>
-        <span class="wa-name">${activeW.name}</span>
-      </div>
-      <div class="wa-ammo">${ammoHtml}</div>`;
-
-    // 7. 3 Crew HP Bar Cards (Portrait + Name + Clean Emerald HP Bar — ZERO READY / CD text!)
-    this.crewEl.innerHTML = CREW.map((c) => {
-      const hp = Math.max(0, Math.min(100, Math.round(state.crewHealth?.[c.id] ?? 100)));
-      return `<div class="crew-card">
-        <div class="crew-ava">${renderPortraitSvg(c.id)}</div>
-        <div class="crew-meta">
-          <div class="crew-name-row">
-            <span class="crew-name">${c.name.split(' ')[0]}</span>
-            <span class="crew-hp-num">${hp}</span>
-          </div>
-          <div class="crew-hp-track"><div class="crew-hp-fill" style="width:${hp}%"></div></div>
+      <div class="wa-row">
+        <div class="wa-left">
+          <div class="wa-icon">${renderWeaponSvg(activeW.id)}</div>
+          <span class="wa-name">${activeW.shortName}</span>
         </div>
-      </div>`;
-    }).join('');
+        <div class="wa-ammo">${ammoHtml}</div>
+      </div>${reloadBar}`;
 
-    // 8. District + Standing
-    const dist = DISTRICTS.find((d) => d.id === state.currentDistrictId) ?? DISTRICTS[0];
-    const stVal = state.districtStanding[dist.id] ?? 50;
-    const tier = getStandingTier(stVal);
-    this.districtEl.innerHTML = `
-      <div class="district-top">
-        <span class="district-name">${dist.name}</span>
-        <span class="district-stand">${tier} · ${stVal}</span>
-      </div>
-      <div class="bar-track"><div class="bar-fill" style="width:${stVal}%;background:linear-gradient(90deg,#34e0c8,#ffbe55)"></div></div>`;
+    // 5. Compact Crew HP Bars ONLY when crew is active with you
+    if (state.crewActive) {
+      this.crewEl.classList.remove('hidden');
+      this.crewEl.innerHTML = CREW.map((c) => {
+        const hp = Math.max(0, Math.min(100, Math.round(state.crewHealth?.[c.id] ?? 100)));
+        return `<div class="crew-card">
+          <div class="crew-ava">${renderPortraitSvg(c.id)}</div>
+          <div class="crew-meta">
+            <span class="crew-name">${c.name.split(' ')[0]}</span>
+            <div class="crew-hp-track"><div class="crew-hp-fill" style="width:${hp}%"></div></div>
+          </div>
+        </div>`;
+      }).join('');
+    } else {
+      this.crewEl.classList.add('hidden');
+    }
 
-    // GPS Pill on minimap
-    const gpsGoal = state.customWaypoint ?? stage?.target;
-    const gpsDist = gpsGoal ? Math.round(Math.hypot(playerPos.x - gpsGoal.x, playerPos.z - gpsGoal.z)) : 0;
-    this.gpsPillEl.innerHTML = `<span>${state.customWaypoint ? state.customWaypoint.label : (mission?.district ?? 'Cala Dorada')}</span><span>${gpsDist}m</span>`;
-
-    // 9. Health & Armor Bars
+    // 6. Pure GTA Bottom-Left Vitals: Health (green) + Armor (blue) + slim Stamina bar (cyan/amber when exhausted)
+    const hpPct = Math.max(0, Math.min(100, Math.round(state.health)));
+    const arPct = Math.max(0, Math.min(100, Math.round(state.armor)));
+    const stPct = Math.max(0, Math.min(100, Math.round(state.stamina ?? 100)));
+    const stamCol = state.exhausted
+      ? (Math.sin(elapsed * 14) > 0 ? '#ff6b4a' : '#ffbe55')
+      : 'linear-gradient(90deg,#f59e0b,#ffd24d)';
     this.vitalsEl.innerHTML = `
-      <div class="vital-row">
-        <span class="vital-lbl">HEALTH</span>
-        <div class="bar-track"><div class="bar-fill" style="width:${Math.round(state.health)}%;background:linear-gradient(90deg,#2ecc71,#58f09c)"></div></div>
-        <span class="vital-num">${Math.round(state.health)}</span>
+      <div class="vital-split">
+        <div class="bar-track"><div class="bar-fill" style="width:${hpPct}%;background:linear-gradient(90deg,#22c55e,#4ade80)"></div></div>
+        <div class="bar-track"><div class="bar-fill" style="width:${arPct}%;background:linear-gradient(90deg,#3b82f6,#60a5fa)"></div></div>
       </div>
-      <div class="vital-row">
-        <span class="vital-lbl">ARMOR</span>
-        <div class="bar-track"><div class="bar-fill" style="width:${Math.round(state.armor)}%;background:linear-gradient(90deg,#3b82f6,#5eead4)"></div></div>
-        <span class="vital-num">${Math.round(state.armor)}</span>
-      </div>`;
+      <div class="bar-track slim"><div class="bar-fill" style="width:${stPct}%;background:${stamCol}"></div></div>`;
 
-    // 10. Portrait Dialogue Box
+    // 7. Portrait Dialogue Box (shown during story beats)
     if (state.dialogue) {
       this.dialogueEl.classList.remove('hidden');
       this.dialogueEl.innerHTML = `
@@ -445,27 +444,18 @@ export class HudOverlay {
       this.dialogueEl.classList.add('hidden');
     }
 
-    // 11. Radio Ticker (Clean — no [R] TUNE spam!)
-    const st = RADIO_STATIONS[state.radioStationIdx];
-    const track = st.tracks[state.radioTrackIdx % st.tracks.length];
-    this.radioEl.innerHTML = `
-      <span class="radio-badge">${st.freq}</span>
-      <div class="radio-info">
-        <div class="radio-station">${st.name.toUpperCase()}</div>
-        <div class="radio-track">${state.radioMuted ? 'Muted' : `♪ ${track}`}</div>
-      </div>`;
-
-    // 12. Vehicle Speedometer (ONLY shown in vehicle — ZERO "ON FOOT", ZERO "SUPER", ZERO "NITRO 100% · [SHIFT]"!)
+    // 8. Minimal Radio Station Name (ONLY while driving) + Clean Speedometer (ONLY while driving!)
     if (state.inVehicle && playerVehicle) {
+      const st = RADIO_STATIONS[state.radioStationIdx];
+      this.radioEl.classList.remove('hidden');
+      this.radioEl.textContent = state.radioMuted ? 'RADIO OFF' : st.name;
+
       this.vehicleEl.classList.remove('hidden');
-      const mph = Math.round(playerVehicle.speed * 2.32);
-      const hpPct = Math.round((playerVehicle.hp / playerVehicle.maxHp) * 100);
+      const mph = Math.round(playerVehicle.speed * 2.237);
+      const condPct = Math.max(0, Math.min(100, Math.round((playerVehicle.hp / playerVehicle.maxHp) * 100)));
       const nitroPct = Math.round(playerVehicle.nitro);
-      const hpCol = hpPct > 55 ? '#42e38c' : hpPct > 28 ? '#ffbe55' : '#ff3b5c';
+      const condCol = condPct > 55 ? '#42e38c' : condPct > 28 ? '#ffbe55' : '#ff3b5c';
       this.vehicleEl.innerHTML = `
-        <div class="veh-top">
-          <span class="veh-name">${playerVehicle.spec.name}</span>
-        </div>
         <div class="veh-speed-row">
           <div class="speed-big">
             <span class="speed-num">${mph}</span>
@@ -473,8 +463,8 @@ export class HudOverlay {
           </div>
           <div class="veh-bars">
             <div class="veh-bar-row">
-              <svg class="veh-bar-ico" viewBox="0 0 16 16" fill="${hpCol}"><path d="M8 1L2 3.5v4.2c0 3.6 2.5 6.4 6 7.3 3.5-.9 6-3.7 6-7.3V3.5L8 1z"/></svg>
-              <div class="bar-track"><div class="bar-fill" style="width:${hpPct}%;background:${hpCol}"></div></div>
+              <svg class="veh-bar-ico" viewBox="0 0 16 16" fill="${condCol}"><path d="M8 1L2 3.5v4.2c0 3.6 2.5 6.4 6 7.3 3.5-.9 6-3.7 6-7.3V3.5L8 1z"/></svg>
+              <div class="bar-track"><div class="bar-fill" style="width:${condPct}%;background:${condCol}"></div></div>
             </div>
             <div class="veh-bar-row">
               <svg class="veh-bar-ico" viewBox="0 0 16 16" fill="#34e0c8"><path d="M9.5 1L3 9.2h4.4L6.5 15 13 6.8H8.6L9.5 1z"/></svg>
@@ -483,6 +473,7 @@ export class HudOverlay {
           </div>
         </div>`;
     } else {
+      this.radioEl.classList.add('hidden');
       this.vehicleEl.classList.add('hidden');
     }
 
@@ -494,7 +485,7 @@ export class HudOverlay {
       this.toastEl.classList.add('hidden');
     }
 
-    if (promptText) {
+    if (promptText && !state.statusOverlay) {
       this.promptEl.classList.remove('hidden');
       this.promptEl.textContent = promptText;
     } else {

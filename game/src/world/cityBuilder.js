@@ -2,9 +2,10 @@
 
 import * as THREE from '../../vendor/three.module.min.js';
 import { WORLD, PROPERTIES } from '../core/config.js';
-import { ROAD_X, ROAD_Z, STUNT_RAMPS, GOLDEN_SHELLS, FISHING_SPOTS, GARDEN_SITES, ROOF_REPAIR_SITES } from './cityPlan.js';
+import { ROAD_X, ROAD_Z, PUBLIC_FACILITIES, GOLDEN_SHELLS, FISHING_SPOTS, GARDEN_SITES, ROOF_REPAIR_SITES } from './cityPlan.js';
+import { CollisionWorld } from './collisionWorld.js';
 import { createSignTexture } from './textures.js';
-import { getRadialGlowTexture } from '../entities/vehicleFactory.js';
+import { getRadialGlowTexture, createVehicleMesh } from '../entities/vehicleFactory.js';
 
 function seededRand(seed) {
   let s = seed >>> 0;
@@ -18,22 +19,35 @@ export function buildCalaDoradaCity(scene, textures) {
   const rand = seededRand(202607);
   const root = new THREE.Group();
   root.name = 'CalaDoradaWorld';
-  const colliders = []; // { minX, maxX, minZ, maxZ, height }
-  const animated = { ocean: null, palms: [], shells: [], lanterns: [], propertyBeacons: [], gardenBeds: {}, roofSites: {} };
+  const collisionWorld = new CollisionWorld(48);
+  const colliders = collisionWorld.colliders;
+  const animated = {
+    ocean: null,
+    palms: [],
+    shells: [],
+    lanterns: [],
+    propertyBeacons: [],
+    gardenBeds: {},
+    roofSites: {},
+    streetLampPositions: [],
+    nightGlowMeshes: [],
+    nightWindowMats: [],
+    trafficSignals: [],
+  };
 
-  // 1. Base City Terrain & Terraced Plaza Slab
+  // 1. Base City Terrain & Terraced Plaza Slab (ends cleanly at beach z=230 so it NEVER overlaps ocean!)
   const groundMat = new THREE.MeshStandardMaterial({ map: textures.sidewalk, roughness: 0.88, metalness: 0.04 });
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(1180, 920), groundMat);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(1180, 700), groundMat);
   ground.rotation.x = -Math.PI / 2;
-  ground.position.set(0, 0, -90);
+  ground.position.set(0, 0, -120);
   ground.receiveShadow = true;
   root.add(ground);
 
-  // Golden Beach Sand Strip along South Coast (Paseo Dorado + Bahia Esmeralda)
+  // Golden Beach Sand Strip along South Coast (Paseo Dorado + Bahia Esmeralda, z=224..280)
   const sandMat = new THREE.MeshStandardMaterial({ map: textures.sand, roughness: 0.94, metalness: 0.02 });
-  const beach = new THREE.Mesh(new THREE.PlaneGeometry(1260, 62), sandMat);
+  const beach = new THREE.Mesh(new THREE.PlaneGeometry(1260, 56), sandMat);
   beach.rotation.x = -Math.PI / 2;
-  beach.position.set(0, 0.05, 253);
+  beach.position.set(0, 0.05, 252);
   beach.receiveShadow = true;
   root.add(beach);
 
@@ -134,13 +148,14 @@ export function buildCalaDoradaCity(scene, textures) {
     }
   }
 
-  // 4. Iconic Red-and-Gold Cable-Stayed Bridge: PUENTE DEL SOL
-  buildPuenteDelSol(root, 110, 200);
+  // 4. Iconic Red-and-Gold Cable-Stayed Bridge: PUENTE DEL SOL (with solid guardrails & tower colliders)
+  buildPuenteDelSol(root, 110, 200, collisionWorld, animated);
 
   // 5. Detailed Non-Boxy Architectural City Builder
   const trimStoneMat = new THREE.MeshStandardMaterial({ color: 0xf7e3c4, roughness: 0.48, metalness: 0.18 });
   const darkMetalMat = new THREE.MeshStandardMaterial({ color: 0x263140, roughness: 0.42, metalness: 0.72 });
-  const lobbyGlassMat = new THREE.MeshStandardMaterial({ color: 0x1a2e44, emissive: 0x452c16, emissiveIntensity: 0.45, roughness: 0.16, metalness: 0.75 });
+  const lobbyGlassMat = new THREE.MeshStandardMaterial({ color: 0x1a2e44, emissive: 0x6b451f, emissiveIntensity: 0.55, roughness: 0.16, metalness: 0.75 });
+  animated.nightWindowMats.push(lobbyGlassMat);
   const terraRoofMat = new THREE.MeshStandardMaterial({ color: 0xb84f32, roughness: 0.76, metalness: 0.05 });
   const awningPalette = [0xff5d47, 0x2ec4b6, 0xffbe55, 0xe84393, 0x3b82f6];
   const beaconGlowTex = getRadialGlowTexture('#ffffff', 'rgba(255,60,92,0.88)', 'rgba(0,0,0,0)');
@@ -149,7 +164,15 @@ export function buildCalaDoradaCity(scene, textures) {
     const style = opts.style ?? (h >= 54 ? 'tower' : 'deco');
     const spire = Boolean(opts.spire);
     const bGroup = new THREE.Group();
-    const matSide = new THREE.MeshStandardMaterial({ map: facadeTex, roughness: style === 'tower' ? 0.34 : 0.56, metalness: style === 'tower' ? 0.38 : 0.14 });
+    const matSide = new THREE.MeshStandardMaterial({
+      map: facadeTex,
+      emissiveMap: facadeTex,
+      emissive: new THREE.Color(0xffd699),
+      emissiveIntensity: 0.12,
+      roughness: style === 'tower' ? 0.34 : 0.56,
+      metalness: style === 'tower' ? 0.38 : 0.14,
+    });
+    animated.nightWindowMats.push(matSide);
     const matRoof = new THREE.MeshStandardMaterial({ color: roofColor, roughness: 0.74 });
 
     // Ground-floor podium / arched colonnade & recessed storefront base
@@ -394,7 +417,7 @@ export function buildCalaDoradaCity(scene, textures) {
     }
 
     root.add(bGroup);
-    colliders.push({ minX: x - w / 2 - 0.6, maxX: x + w / 2 + 0.6, minZ: z - d / 2 - 0.6, maxZ: z + d / 2 + 0.6, height: h });
+    collisionWorld.addBox(x - w / 2 - 0.5, x + w / 2 + 0.5, z - d / 2 - 0.5, z + d / 2 + 0.5, h, 'building');
   };
 
   // Paseo Dorado Oceanfront Art-Deco Hero Hotels & Solsticio Beach Club (facing south toward beach!)
@@ -415,12 +438,11 @@ export function buildCalaDoradaCity(scene, textures) {
   }, { style: 'tower', spire: true });
   addBuilding(-62, -62, 34, 32, 84, textures.facadeGlassTeal, 0x1e364c, null, { style: 'tower', spire: true });
   addBuilding(116, -62, 32, 32, 78, textures.facadeGlassGold, 0x2a4561, null, { style: 'tower', spire: true });
-  addBuilding(-112, -118, 34, 28, 72, textures.facadeGlassTeal, 0x1d3448, null, { style: 'tower' });
   addBuilding(56, -124, 36, 28, 92, textures.facadeGlassGold, 0x223b54, null, { style: 'tower', spire: true });
-  addBuilding(-58, 56, 36, 30, 64, textures.facadeGlassTeal, 0x1e354c, null, { style: 'tower' });
   addBuilding(62, 58, 34, 28, 74, textures.facadeGlassGold, 0x28435e, {
     text: 'TORRE DORADA', bg: '#111829', fg: '#ffbe55', accent: '#34e0c8', rooftop: true, southFace: true, width: 28, height: 5.8,
   }, { style: 'tower', spire: true });
+  // Note: (-102,-124) hosts Cala Dorada General Hospital, (118,-124) hosts CDPD Precinct HQ, and (-90,60) hosts Central Parque Dorado!
 
   // Barrio Viejo Properties: Dante's Loft (Safehouse) & Rafa's Chop & Spray (Garage)
   addBuilding(92, -264, 30, 24, 18, textures.facadeArtDecoCoral, 0xb8593c, {
@@ -472,19 +494,21 @@ export function buildCalaDoradaCity(scene, textures) {
     { x: 255, z: -265, w: 36, d: 28, h: 22, t: textures.facadeArtDecoCoral, style: 'villa' },
     { x: 255, z: -395, w: 34, d: 28, h: 24, t: textures.facadeArtDecoTeal, style: 'deco' },
     { x: 90, z: -395, w: 34, d: 28, h: 26, t: textures.facadeArtDecoCream, style: 'villa' },
-    // Extra Downtown Skyline depth (stepped glass towers)
-    { x: -115, z: 54, w: 30, d: 28, h: 58, t: textures.facadeGlassGold, style: 'tower', spire: true },
+    // Extra Downtown Skyline depth (stepped glass towers — shifted clear of Parque Dorado & Precinct HQ)
+    { x: -124, z: -60, w: 30, d: 28, h: 62, t: textures.facadeGlassGold, style: 'tower', spire: true },
     { x: 120, z: 56, w: 32, d: 28, h: 66, t: textures.facadeGlassTeal, style: 'tower', spire: true },
-    { x: 184, z: 56, w: 28, d: 28, h: 52, t: textures.facadeGlassGold, style: 'tower' },
-    { x: 118, z: -124, w: 30, d: 28, h: 64, t: textures.facadeGlassTeal, style: 'tower' },
+    { x: 214, z: 56, w: 28, d: 28, h: 52, t: textures.facadeGlassGold, style: 'tower' },
     { x: -110, z: -218, w: 28, d: 22, h: 32, t: textures.facadeArtDecoCoral, style: 'deco' },
   ];
   for (const b of blockDefs) {
     addBuilding(b.x, b.z, b.w, b.d, b.h, b.t, 0x3b4859, null, { style: b.style, spire: b.spire });
   }
 
+  // 5b. Real Public Urban Facilities (General Hospital, CDPD Precinct HQ, Central Parque Dorado, Bus Stops, Traffic Lights, Hydrants, Curbs, Parking Lots & Coastal Perimeter)
+  buildPublicFacilities(root, collisionWorld, animated, textures, rand);
+
   // 6. Mercado Nocturno: Cobblestone Lantern Night Market Alley with Tight Focused Lighting
-  buildMercadoNocturno(root, colliders, animated, textures);
+  buildMercadoNocturno(root, collisionWorld, animated, textures);
 
   // 7. Lush Coastal Coconut Palm Trees (Boardwalk, Dunes, Beach & Boulevards)
   // Keep Puente del Sol road approach sightline unobstructed while making both beaches lush and tropical!
@@ -528,40 +552,59 @@ export function buildCalaDoradaCity(scene, textures) {
   }
 
   // 8. Lush Beach Vegetation Clusters & Coastal Beach Props (Paseo Dorado + Bahia Esmeralda!)
-  buildLushBeachEnvironment(root, rand);
+  buildLushBeachEnvironment(root, rand, collisionWorld);
 
-  // 9. Streetlamps along Main Avenues (tighter focused warm halos)
+  // 9. Streetlamps along Main Avenues with Working Night Ground Glow Pools
   const lampMat = new THREE.MeshStandardMaterial({ color: 0x262e3d, metalness: 0.7, roughness: 0.3 });
-  const bulbMat = new THREE.MeshBasicMaterial({ color: 0xffe09e });
-  const lampGlowTex = getRadialGlowTexture('rgba(255,240,190,0.78)', 'rgba(255,176,72,0.24)', 'rgba(0,0,0,0)');
+  const bulbMat = new THREE.MeshBasicMaterial({ color: 0xffe4a8 });
+  const lampGlowTex = getRadialGlowTexture('rgba(255,240,190,0.82)', 'rgba(255,176,72,0.28)', 'rgba(0,0,0,0)');
+  const streetPoolTex = getRadialGlowTexture('rgba(255,214,132,0.44)', 'rgba(255,164,68,0.16)', 'rgba(0,0,0,0)');
+  const addStreetLamp = (lx, lz) => {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.21, 8.2, 6), lampMat);
+    pole.position.set(lx, 4.1, lz);
+    root.add(pole);
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.14, 0.14), lampMat);
+    arm.position.set(lx, 8.15, lz);
+    root.add(arm);
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.36, 8, 8), bulbMat);
+    lamp.position.set(lx, 8.25, lz);
+    root.add(lamp);
+    const haloMat = new THREE.SpriteMaterial({
+      map: lampGlowTex, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const halo = new THREE.Sprite(haloMat);
+    halo.scale.set(2.1, 2.1, 1);
+    halo.position.set(lx, 8.25, lz);
+    root.add(halo);
+    // Warm localized road/sidewalk illumination pool directly underneath each lamp
+    const poolMat = new THREE.MeshBasicMaterial({
+      map: streetPoolTex, transparent: true, opacity: 0.65, blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const pool = new THREE.Mesh(new THREE.PlaneGeometry(16.5, 16.5), poolMat);
+    pool.rotation.x = -Math.PI / 2;
+    pool.position.set(lx, 0.13, lz);
+    root.add(pool);
+    animated.streetLampPositions.push(new THREE.Vector3(lx, 7.6, lz));
+    animated.nightGlowMeshes.push({ mat: haloMat, dayOp: 0.18, nightOp: 0.92 });
+    animated.nightGlowMeshes.push({ mat: poolMat, dayOp: 0.0, nightOp: 0.76 });
+  };
+
   for (let x = -320; x <= 320; x += 48) {
-    for (const lz of [186, 214, 14, -14]) {
+    for (const lz of [186, 214, 134, 106, 14, -14, -166, -194]) {
       if (Math.abs(x - 110) < 58 && lz > 150) continue;
       if (x >= -5 && x <= 48 && lz > 150) continue;
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 8.2, 6), lampMat);
-      pole.position.set(x, 4.1, lz);
-      root.add(pole);
-      const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.38, 8, 8), bulbMat);
-      lamp.position.set(x, 8.3, lz);
-      root.add(lamp);
-      const halo = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: lampGlowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
-      }));
-      halo.scale.set(1.85, 1.85, 1);
-      halo.position.set(x, 8.3, lz);
-      root.add(halo);
+      if (lz < 150 && (Math.abs(x % 180) < 18)) continue;
+      addStreetLamp(x, lz);
+    }
+  }
+  for (let z = -310; z <= 160; z += 54) {
+    for (const lx of [-194, -166, -14, 14, 166, 194]) {
+      if (Math.abs(z - 200) < 20 || Math.abs(z - 120) < 20 || Math.abs(z) < 20 || Math.abs(z + 180) < 20) continue;
+      addStreetLamp(lx, z);
     }
   }
 
-  // 10. Stunt Ramps
-  const rampMat = new THREE.MeshStandardMaterial({ color: 0xff9f2e, roughness: 0.4, metalness: 0.2 });
-  for (const r of STUNT_RAMPS) {
-    const ramp = new THREE.Mesh(new THREE.BoxGeometry(7.5, 2.2, 11), rampMat);
-    ramp.position.set(r.x, 0.9, r.z);
-    ramp.rotation.y = r.yaw;
-    ramp.rotation.x = -0.22;
-    root.add(ramp);
-  }
+  // (All out-of-nowhere mid-street stunt ramps removed for realistic drivable roads!)
 
   // 11. 8 Interactive City Property Entrance Rings, Glowing Beacons & Sidewalk Kiosk Signs
   for (const prop of PROPERTIES) {
@@ -615,13 +658,13 @@ export function buildCalaDoradaCity(scene, textures) {
   }
 
   // 13. Interactive World Activity Sites (Fishing Piers, Raised Garden Beds & Barrio Viejo Terracotta Roof Repair)
-  buildActivityWorldSites(root, animated);
+  buildActivityWorldSites(root, animated, collisionWorld);
 
   scene.add(root);
-  return { root, colliders, animated };
+  return { root, colliders, collisionWorld, animated };
 }
 
-function buildActivityWorldSites(root, animated) {
+function buildActivityWorldSites(root, animated, collisionWorld) {
   const woodMat = new THREE.MeshStandardMaterial({ color: 0x8a5e3b, roughness: 0.86 });
   const soilMat = new THREE.MeshStandardMaterial({ color: 0x3b281c, roughness: 0.95 });
   const terraMat = new THREE.MeshStandardMaterial({ color: 0xc25434, roughness: 0.72 });
@@ -742,6 +785,7 @@ function buildActivityWorldSites(root, animated) {
 
     root.add(rg);
     animated.roofSites[site.id] = tileSlots;
+    collisionWorld.addRect(site.x, site.z - 3.5, 8.4, 5.8, 4.0, 'prop');
   }
 }
 
@@ -768,7 +812,7 @@ function buildBoardwalkFences(root) {
   root.add(g);
 }
 
-function buildLushBeachEnvironment(root, rand) {
+function buildLushBeachEnvironment(root, rand, collisionWorld) {
   const g = new THREE.Group();
   const umbColors = [0xff6b4a, 0x34e0c8, 0xffbe55, 0xff4b72, 0x4ba3ff];
 
@@ -818,11 +862,13 @@ function buildLushBeachEnvironment(root, rand) {
   lg1.position.set(-78, 0.05, 246);
   lg1.rotation.y = -0.18;
   g.add(lg1);
+  if (collisionWorld) collisionWorld.addRect(-78, 246, 4.4, 4.4, 7.0, 'prop');
 
   const lg2 = createLifeguardTower(0xffbe55, 0x2ec4b6);
   lg2.position.set(206, 0.05, 244);
   lg2.rotation.y = -0.35;
   g.add(lg2);
+  if (collisionWorld) collisionWorld.addRect(206, 244, 4.4, 4.4, 7.0, 'prop');
 
   // 5. Thatched Tiki Shade Huts along both beaches
   const tikiSpots = [
@@ -832,6 +878,7 @@ function buildLushBeachEnvironment(root, rand) {
     const hut = createTikiHut();
     hut.position.set(tx, 0.05, tz);
     g.add(hut);
+    if (collisionWorld) collisionWorld.addRect(tx, tz, 3.6, 3.6, 4.5, 'prop');
   }
 
   // 6. Colorful Striped Beach Umbrellas with Twin Lounge Chairs & Beach Towels
@@ -1069,12 +1116,13 @@ function buildMarinaBoats(root) {
   root.add(g);
 }
 
-function buildPuenteDelSol(root, cx, cz) {
+function buildPuenteDelSol(root, cx, cz, collisionWorld, animated) {
   const g = new THREE.Group();
   const redSteel = new THREE.MeshStandardMaterial({ color: 0xdf3b30, roughness: 0.34, metalness: 0.48 });
   const goldTrim = new THREE.MeshStandardMaterial({ color: 0xffc84d, roughness: 0.28, metalness: 0.72 });
   const deckMat = new THREE.MeshStandardMaterial({ color: 0x262c38, roughness: 0.68 });
   const lampGlowTex = getRadialGlowTexture('rgba(255,244,205,0.85)', 'rgba(255,176,72,0.28)', 'rgba(0,0,0,0)');
+  const bridgePoolTex = getRadialGlowTexture('rgba(255,214,132,0.38)', 'rgba(255,164,68,0.12)', 'rgba(0,0,0,0)');
   const redBeaconTex = getRadialGlowTexture('#ffffff', 'rgba(255,48,78,0.86)', 'rgba(0,0,0,0)');
 
   const deck = new THREE.Mesh(new THREE.BoxGeometry(142, 0.8, 23.5), deckMat);
@@ -1088,15 +1136,31 @@ function buildPuenteDelSol(root, cx, cz) {
     topBar.position.set(cx, 1.85, cz + side);
     g.add(rail, topBar);
 
+    if (collisionWorld) {
+      collisionWorld.addRect(cx, cz + side, 142, 1.2, 4.0, 'bridge-rail');
+    }
+
     for (let lx = cx - 56; lx <= cx + 56; lx += 28) {
       const post = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 6.2, 6), redSteel);
       post.position.set(lx, 4.2, cz + side * 0.96);
-      const orb = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: lampGlowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
-      }));
-      orb.scale.set(1.75, 1.75, 1);
+      const orbMat = new THREE.SpriteMaterial({
+        map: lampGlowTex, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false,
+      });
+      const orb = new THREE.Sprite(orbMat);
+      orb.scale.set(1.9, 1.9, 1);
       orb.position.set(lx, 7.4, cz + side * 0.92);
       g.add(post, orb);
+      if (animated) {
+        const poolMat = new THREE.MeshBasicMaterial({
+          map: bridgePoolTex, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        const pool = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), poolMat);
+        pool.rotation.x = -Math.PI / 2;
+        pool.position.set(lx, 0.76, cz + side * 0.6);
+        g.add(pool);
+        animated.streetLampPositions.push(new THREE.Vector3(lx, 7.2, cz + side * 0.8));
+        animated.nightGlowMeshes.push({ mat: poolMat, dayOp: 0.0, nightOp: 0.72 });
+      }
     }
   }
 
@@ -1117,6 +1181,9 @@ function buildPuenteDelSol(root, cx, cz) {
       beacon.scale.set(2.8, 2.8, 1);
       beacon.position.set(px, 50.8, cz + side);
       g.add(towerLower, towerUpper, cap, beacon);
+      if (collisionWorld) {
+        collisionWorld.addRect(px, cz + side, 3.8, 3.8, 50, 'bridge-tower');
+      }
     }
     for (const cy of [18, 32, 44.5]) {
       const beam = new THREE.Mesh(new THREE.BoxGeometry(2.3, 2.3, 24.4), goldTrim);
@@ -1141,7 +1208,7 @@ function buildPuenteDelSol(root, cx, cz) {
   root.add(g);
 }
 
-function buildMercadoNocturno(root, colliders, animated, textures) {
+function buildMercadoNocturno(root, collisionWorld, animated, textures) {
   const g = new THREE.Group();
   const cx = -310;
   const cz = -55;
@@ -1219,6 +1286,8 @@ function buildMercadoNocturno(root, colliders, animated, textures) {
     const wall = new THREE.Mesh(new THREE.BoxGeometry(8, 17, 86), alleyWallMat);
     wall.position.set(cx + side * 21, 8.5, cz - 2);
     g.add(wall);
+    collisionWorld.addRect(cx + side * 21, cz - 2, 8.4, 86.4, 17, 'building');
+    collisionWorld.addRect(cx + side * 13.6, cz - 2, 4.6, 76, 4.2, 'stall');
     const cornice = new THREE.Mesh(new THREE.BoxGeometry(8.8, 0.9, 86.6), trimMat);
     cornice.position.set(cx + side * 20.8, 17.2, cz - 2);
     g.add(cornice);
@@ -1303,7 +1372,7 @@ function buildMercadoNocturno(root, colliders, animated, textures) {
     const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 1.28, 10), barrelMat);
     barrel.position.set(kx + 1.65, 0.64, kz - 0.15);
     g.add(crate, barrel);
-    colliders.push({ minX: kx - 1.4, maxX: kx + 2.1, minZ: kz - 0.9, maxZ: kz + 0.9, height: 1.4 });
+    collisionWorld.addBox(kx - 1.4, kx + 2.1, kz - 0.9, kz + 0.9, 1.4, 'prop');
   }
 
   // Crisscrossing Overhead Glowing Paper Lantern Strings (tighter crisp halos)
@@ -1445,4 +1514,393 @@ function createPalmTree(rand, scale = 1.0) {
   g.add(crown);
   g.userData.crown = crown;
   return g;
+}
+
+// Real Public Urban Facilities: Cala Dorada General Hospital, CDPD Precinct HQ, Central Parque Dorado,
+// Covered Bus Stops, Intersection Traffic Lights, Fire Hydrants, Public Parking Lots, Curbs & Natural Coastal Perimeter.
+function buildPublicFacilities(root, collisionWorld, animated, textures, rand) {
+  const g = new THREE.Group();
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0xeae4d8, roughness: 0.56 });
+  const hospitalWhite = new THREE.MeshStandardMaterial({ color: 0xf0f4f8, roughness: 0.42, metalness: 0.1 });
+  const hospitalTeal = new THREE.MeshStandardMaterial({ color: 0x249ea0, roughness: 0.36, metalness: 0.25 });
+  const glassMat = new THREE.MeshStandardMaterial({
+    color: 0x1e3a56, emissive: 0x3b6a88, emissiveIntensity: 0.35, roughness: 0.14, metalness: 0.72,
+  });
+  animated.nightWindowMats.push(glassMat);
+  const darkMetal = new THREE.MeshStandardMaterial({ color: 0x242c38, roughness: 0.42, metalness: 0.75 });
+  const concreteMat = new THREE.MeshStandardMaterial({ color: 0x8d95a0, roughness: 0.85 });
+  const asphaltLotMat = new THREE.MeshStandardMaterial({ color: 0x262c36, roughness: 0.78 });
+  const stripeMat = new THREE.MeshBasicMaterial({ color: 0xdfe6f0 });
+  const poolTex = getRadialGlowTexture('rgba(255,218,142,0.42)', 'rgba(255,168,72,0.14)', 'rgba(0,0,0,0)');
+
+  // 1. CALA DORADA GENERAL HOSPITAL (-102, -124) — WASTED Respawn Facility
+  {
+    const h = PUBLIC_FACILITIES.hospital;
+    const hg = new THREE.Group();
+    const mainBody = new THREE.Mesh(new THREE.BoxGeometry(42, 24, 28), hospitalWhite);
+    mainBody.position.set(h.x, 12, h.z);
+    mainBody.castShadow = true;
+    mainBody.receiveShadow = true;
+    const wingUpper = new THREE.Mesh(new THREE.BoxGeometry(28, 12, 20), hospitalWhite);
+    wingUpper.position.set(h.x, 30, h.z - 2);
+    wingUpper.castShadow = true;
+    const band1 = new THREE.Mesh(new THREE.BoxGeometry(42.6, 2.2, 28.6), hospitalTeal);
+    band1.position.set(h.x, 6.2, h.z);
+    const band2 = new THREE.Mesh(new THREE.BoxGeometry(42.6, 1.4, 28.6), hospitalTeal);
+    band2.position.set(h.x, 23.8, h.z);
+    const winRibbon = new THREE.Mesh(new THREE.BoxGeometry(38, 11, 28.4), glassMat);
+    winRibbon.position.set(h.x, 15, h.z);
+    // Emergency ambulance portico canopy
+    const canopy = new THREE.Mesh(new THREE.BoxGeometry(16, 0.9, 9.5), hospitalTeal);
+    canopy.position.set(h.x, 4.8, h.z + 18.2);
+    for (const px of [-7.2, 7.2]) {
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.36, 4.8, 8), hospitalWhite);
+      col.position.set(h.x + px, 2.4, h.z + 22.2);
+      hg.add(col);
+    }
+    // Glowing Red Cross emblem on facade & rooftop marquee sign
+    const crossMat = new THREE.MeshBasicMaterial({ color: 0xff2e44 });
+    const crossV = new THREE.Mesh(new THREE.BoxGeometry(1.6, 5.2, 0.4), crossMat);
+    crossV.position.set(h.x, 30, h.z + 8.3);
+    const crossH = new THREE.Mesh(new THREE.BoxGeometry(5.2, 1.6, 0.4), crossMat);
+    crossH.position.set(h.x, 30, h.z + 8.3);
+    const sign = new THREE.Mesh(
+      new THREE.BoxGeometry(26, 4.4, 0.8),
+      new THREE.MeshBasicMaterial({ map: createSignTexture('GENERAL HOSPITAL', '#0f202c', '#ffffff', '#ff3b5c') })
+    );
+    sign.position.set(h.x, 38.2, h.z + 7.5);
+    // Emergency bay warm-teal ground glow
+    const bayPoolMat = new THREE.MeshBasicMaterial({
+      map: getRadialGlowTexture('rgba(160,245,255,0.42)', 'rgba(255,80,100,0.14)', 'rgba(0,0,0,0)'),
+      transparent: true, opacity: 0.65, blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const bayPool = new THREE.Mesh(new THREE.PlaneGeometry(18, 14), bayPoolMat);
+    bayPool.rotation.x = -Math.PI / 2;
+    bayPool.position.set(h.x, 0.14, h.z + 19.5);
+    animated.nightGlowMeshes.push({ mat: bayPoolMat, dayOp: 0.08, nightOp: 0.78 });
+    animated.streetLampPositions.push(new THREE.Vector3(h.x, 6.0, h.z + 20));
+    // Parked Ambulance in emergency bay
+    const amb = createVehicleMesh('cdpd_enforcer', 0xf6f8fc);
+    amb.position.set(h.x - 12, 0, h.z + 21);
+    amb.rotation.y = Math.PI / 2;
+    hg.add(mainBody, wingUpper, band1, band2, winRibbon, canopy, crossV, crossH, sign, bayPool, amb);
+    g.add(hg);
+    collisionWorld.addRect(h.x, h.z, 43, 29, 36, 'hospital');
+  }
+
+  // 2. CDPD POLICE PRECINCT HQ (118, -124) — BUSTED Respawn Facility + Cruiser Lot
+  {
+    const p = PUBLIC_FACILITIES.police;
+    const pg = new THREE.Group();
+    const navyMat = new THREE.MeshStandardMaterial({ color: 0x1d3254, roughness: 0.46, metalness: 0.25 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(40, 22, 28), stoneMat);
+    body.position.set(p.x, 11, p.z);
+    body.castShadow = true;
+    const upper = new THREE.Mesh(new THREE.BoxGeometry(28, 10, 22), navyMat);
+    upper.position.set(p.x, 27, p.z);
+    const trim = new THREE.Mesh(new THREE.BoxGeometry(40.8, 2.0, 28.8), navyMat);
+    trim.position.set(p.x, 21.5, p.z);
+    const win = new THREE.Mesh(new THREE.BoxGeometry(34, 9, 28.4), glassMat);
+    win.position.set(p.x, 13, p.z);
+    const sign = new THREE.Mesh(
+      new THREE.BoxGeometry(26, 4.4, 0.8),
+      new THREE.MeshBasicMaterial({ map: createSignTexture('CDPD PRECINCT HQ', '#0d1a33', '#ffffff', '#4ba3ff') })
+    );
+    sign.position.set(p.x, 34.4, p.z + 10.6);
+    // Blue police entrance lamps + ground glow
+    const blueLampMat = new THREE.MeshBasicMaterial({ color: 0x4ba3ff });
+    for (const sx of [-5.5, 5.5]) {
+      const globe = new THREE.Mesh(new THREE.SphereGeometry(0.45, 8, 8), blueLampMat);
+      globe.position.set(p.x + sx, 4.2, p.z + 14.8);
+      pg.add(globe);
+    }
+    const pdPoolMat = new THREE.MeshBasicMaterial({
+      map: getRadialGlowTexture('rgba(80,175,255,0.45)', 'rgba(40,110,255,0.14)', 'rgba(0,0,0,0)'),
+      transparent: true, opacity: 0.65, blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const pdPool = new THREE.Mesh(new THREE.PlaneGeometry(18, 14), pdPoolMat);
+    pdPool.rotation.x = -Math.PI / 2;
+    pdPool.position.set(p.x, 0.14, p.z + 19);
+    animated.nightGlowMeshes.push({ mat: pdPoolMat, dayOp: 0.08, nightOp: 0.82 });
+    animated.streetLampPositions.push(new THREE.Vector3(p.x, 6.0, p.z + 19));
+    // Precinct Cruiser Parking Lot beside HQ
+    const lot = new THREE.Mesh(new THREE.PlaneGeometry(36, 18), asphaltLotMat);
+    lot.rotation.x = -Math.PI / 2;
+    lot.position.set(p.x, 0.11, p.z + 23);
+    for (let s = -12; s <= 12; s += 6) {
+      const line = new THREE.Mesh(new THREE.PlaneGeometry(0.25, 7.5), stripeMat);
+      line.rotation.x = -Math.PI / 2;
+      line.position.set(p.x + s, 0.12, p.z + 23);
+      pg.add(line);
+    }
+    const cr1 = createVehicleMesh('cdpd_interceptor');
+    cr1.position.set(p.x - 9, 0, p.z + 22.5);
+    cr1.rotation.y = 0;
+    const cr2 = createVehicleMesh('cdpd_interceptor');
+    cr2.position.set(p.x - 3, 0, p.z + 22.5);
+    cr2.rotation.y = 0;
+    pg.add(body, upper, trim, win, sign, pdPool, lot, cr1, cr2);
+    g.add(pg);
+    collisionWorld.addRect(p.x, p.z, 41, 29, 32, 'police-hq');
+  }
+
+  // 3. CENTRAL PARQUE DORADO (-90, 60): Green Lawns, Walkways, Central Fountain, Benches, Shade Trees & Park Lamps
+  {
+    const pk = PUBLIC_FACILITIES.park;
+    const lawnMat = new THREE.MeshStandardMaterial({ color: 0x2f8548, roughness: 0.92 });
+    const pathMat = new THREE.MeshStandardMaterial({ color: 0xd2c2a8, roughness: 0.85 });
+    const waterMat = new THREE.MeshStandardMaterial({ color: 0x2ec4d6, emissive: 0x104c5c, emissiveIntensity: 0.35, roughness: 0.14, metalness: 0.45 });
+    const benchWood = new THREE.MeshStandardMaterial({ color: 0x7c5032, roughness: 0.82 });
+
+    const lawn = new THREE.Mesh(new THREE.PlaneGeometry(pk.w, pk.d), lawnMat);
+    lawn.rotation.x = -Math.PI / 2;
+    lawn.position.set(pk.x, 0.08, pk.z);
+    lawn.receiveShadow = true;
+    g.add(lawn);
+
+    // Cross-shaped stone walkways + central plaza circle
+    const walkX = new THREE.Mesh(new THREE.PlaneGeometry(pk.w, 8.5), pathMat);
+    walkX.rotation.x = -Math.PI / 2;
+    walkX.position.set(pk.x, 0.10, pk.z);
+    const walkZ = new THREE.Mesh(new THREE.PlaneGeometry(8.5, pk.d), pathMat);
+    walkZ.rotation.x = -Math.PI / 2;
+    walkZ.position.set(pk.x, 0.10, pk.z);
+    const plaza = new THREE.Mesh(new THREE.CircleGeometry(14, 28), pathMat);
+    plaza.rotation.x = -Math.PI / 2;
+    plaza.position.set(pk.x, 0.11, pk.z);
+    g.add(walkX, walkZ, plaza);
+
+    // Central Sculpted Stone Fountain
+    const basinOuter = new THREE.Mesh(new THREE.CylinderGeometry(5.6, 6.0, 1.15, 24), stoneMat);
+    basinOuter.position.set(pk.x, 0.58, pk.z);
+    const basinWater = new THREE.Mesh(new THREE.CylinderGeometry(4.8, 4.8, 0.95, 24), waterMat);
+    basinWater.position.set(pk.x, 0.62, pk.z);
+    const spireBase = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.6, 3.2, 12), stoneMat);
+    spireBase.position.set(pk.x, 1.8, pk.z);
+    const bowl = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 0.9, 0.7, 16), stoneMat);
+    bowl.position.set(pk.x, 3.3, pk.z);
+    const jet = new THREE.Mesh(
+      new THREE.ConeGeometry(0.9, 2.2, 10),
+      new THREE.MeshBasicMaterial({ color: 0xbff7ff, transparent: true, opacity: 0.65 })
+    );
+    jet.position.set(pk.x, 4.7, pk.z);
+    g.add(basinOuter, basinWater, spireBase, bowl, jet);
+    collisionWorld.addRect(pk.x, pk.z, 11.4, 11.4, 3.5, 'park-fountain');
+
+    // Low perimeter park stone walls with wide open walkway entrances on all 4 sides
+    const wallH = 1.15;
+    const halfW = pk.w / 2;
+    const halfD = pk.d / 2;
+    const segW = (pk.w - 16) / 2;
+    const segD = (pk.d - 16) / 2;
+    for (const sz of [-halfD, halfD]) {
+      for (const sx of [-halfW + segW / 2, halfW - segW / 2]) {
+        const wMesh = new THREE.Mesh(new THREE.BoxGeometry(segW, wallH, 1.1), stoneMat);
+        wMesh.position.set(pk.x + sx, wallH / 2, pk.z + sz);
+        g.add(wMesh);
+        collisionWorld.addRect(pk.x + sx, pk.z + sz, segW, 1.3, wallH + 0.5, 'park-wall');
+      }
+    }
+    for (const sx of [-halfW, halfW]) {
+      for (const sz of [-halfD + segD / 2, halfD - segD / 2]) {
+        const wMesh = new THREE.Mesh(new THREE.BoxGeometry(1.1, wallH, segD), stoneMat);
+        wMesh.position.set(pk.x + sx, wallH / 2, pk.z + sz);
+        g.add(wMesh);
+        collisionWorld.addRect(pk.x + sx, pk.z + sz, 1.3, segD, wallH + 0.5, 'park-wall');
+      }
+    }
+
+    // Park benches & lush shade trees + warm night park lamps
+    const treeOffsets = [
+      [-36, -22], [-18, -24], [22, -22], [38, -20],
+      [-38, 20], [-20, 24], [20, 22], [38, 22],
+      [-34, -4], [34, 4],
+    ];
+    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6b472c, roughness: 0.9 });
+    const leafMatA = new THREE.MeshStandardMaterial({ color: 0x267a42, roughness: 0.78 });
+    const leafMatB = new THREE.MeshStandardMaterial({ color: 0x369650, roughness: 0.76 });
+    for (const [ox, oz] of treeOffsets) {
+      const tx = pk.x + ox;
+      const tz = pk.z + oz;
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.48, 4.6, 8), trunkMat);
+      trunk.position.set(tx, 2.3, tz);
+      trunk.castShadow = true;
+      const crown = new THREE.Mesh(new THREE.DodecahedronGeometry(3.2, 1), (ox + oz) % 2 === 0 ? leafMatA : leafMatB);
+      crown.position.set(tx, 5.8, tz);
+      crown.scale.set(1.15, 0.85, 1.15);
+      crown.castShadow = true;
+      g.add(trunk, crown);
+    }
+
+    const benchCoords = [[-13, -7], [13, -7], [-13, 7], [13, 7], [-28, -5.5], [28, 5.5]];
+    for (const [bx, bz] of benchCoords) {
+      const seat = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.16, 0.72), benchWood);
+      seat.position.set(pk.x + bx, 0.55, pk.z + bz);
+      const back = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.55, 0.14), benchWood);
+      back.position.set(pk.x + bx, 0.9, pk.z + bz - 0.32);
+      g.add(seat, back);
+    }
+
+    const parkLampCoords = [[-16, -16], [16, -16], [-16, 16], [16, 16], [-42, 0], [42, 0]];
+    const warmBulb = new THREE.MeshBasicMaterial({ color: 0xffe4a8 });
+    for (const [lx, lz] of parkLampCoords) {
+      const px = pk.x + lx;
+      const pz = pk.z + lz;
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 4.6, 6), darkMetal);
+      pole.position.set(px, 2.3, pz);
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.32, 8, 8), warmBulb);
+      bulb.position.set(px, 4.75, pz);
+      const pPoolMat = new THREE.MeshBasicMaterial({
+        map: poolTex, transparent: true, opacity: 0.65, blending: THREE.AdditiveBlending, depthWrite: false,
+      });
+      const pPool = new THREE.Mesh(new THREE.PlaneGeometry(13, 13), pPoolMat);
+      pPool.rotation.x = -Math.PI / 2;
+      pPool.position.set(px, 0.14, pz);
+      g.add(pole, bulb, pPool);
+      animated.streetLampPositions.push(new THREE.Vector3(px, 4.6, pz));
+      animated.nightGlowMeshes.push({ mat: pPoolMat, dayOp: 0.0, nightOp: 0.78 });
+    }
+  }
+
+  // 4. PUBLIC PARKING LOTS (beside Parque Dorado & Paseo Plaza)
+  const parkingLots = [
+    { x: -158, z: 158, w: 30, d: 22 },
+    { x: 18, z: 58, w: 24, d: 30 },
+  ];
+  for (const pl of parkingLots) {
+    const pad = new THREE.Mesh(new THREE.PlaneGeometry(pl.w, pl.d), asphaltLotMat);
+    pad.rotation.x = -Math.PI / 2;
+    pad.position.set(pl.x, 0.11, pl.z);
+    g.add(pad);
+    for (let sx = -pl.w / 2 + 4; sx <= pl.w / 2 - 4; sx += 5.5) {
+      const l = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 6.5), stripeMat);
+      l.rotation.x = -Math.PI / 2;
+      l.position.set(pl.x + sx, 0.12, pl.z);
+      g.add(l);
+    }
+    const parked = createVehicleMesh(pl.x < 0 ? 'convertible' : 'cabo_gt', pl.x < 0 ? 0xffbe55 : 0x4ba3ff);
+    parked.position.set(pl.x - 3, 0, pl.z);
+    g.add(parked);
+  }
+
+  // 5. COVERED BUS STOPS along Major Boulevards
+  const busStops = [
+    { x: -145, z: 186.5, rot: 0 },
+    { x: -32, z: 186.5, rot: 0 },
+    { x: 245, z: 186.5, rot: 0 },
+    { x: -85, z: 14.5, rot: 0 },
+    { x: 88, z: -14.5, rot: Math.PI },
+    { x: 132, z: -194.5, rot: Math.PI },
+  ];
+  const shelterGlass = new THREE.MeshStandardMaterial({ color: 0x7dd3fc, transparent: true, opacity: 0.36, roughness: 0.15, metalness: 0.5 });
+  const busAdMat = new THREE.MeshBasicMaterial({ color: 0xffd166 });
+  for (const bs of busStops) {
+    const bg = new THREE.Group();
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(6.2, 0.22, 2.4), darkMetal);
+    roof.position.set(0, 2.85, 0);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(5.8, 2.5, 0.12), shelterGlass);
+    back.position.set(0, 1.4, -1.05);
+    const adBox = new THREE.Mesh(new THREE.BoxGeometry(0.26, 1.9, 1.4), busAdMat);
+    adBox.position.set(-2.95, 1.45, 0);
+    const bench = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.14, 0.55), stoneMat);
+    bench.position.set(0.3, 0.55, -0.55);
+    for (const px of [-2.9, 2.9]) {
+      const p1 = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 2.85, 6), darkMetal);
+      p1.position.set(px, 1.42, -1.05);
+      const p2 = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 2.85, 6), darkMetal);
+      p2.position.set(px, 1.42, 0.95);
+      bg.add(p1, p2);
+    }
+    bg.add(roof, back, adBox, bench);
+    bg.position.set(bs.x, 0, bs.z);
+    bg.rotation.y = bs.rot;
+    g.add(bg);
+    collisionWorld.addRect(bs.x, bs.z, 6.2, 2.4, 3.0, 'bus-stop');
+  }
+
+  // 6. INTERSECTION TRAFFIC LIGHTS (Glowing Red / Amber / Green Signals that Cycle Smoothly!)
+  const majorIntersections = [
+    [-180, 200], [0, 200], [180, 200],
+    [-180, 120], [0, 120], [180, 120],
+    [-180, 0], [0, 0], [180, 0],
+    [-180, -180], [0, -180], [180, -180],
+  ];
+  for (let i = 0; i < majorIntersections.length; i++) {
+    const [ix, iz] = majorIntersections[i];
+    const poleX = ix + 12.2;
+    const poleZ = iz + 12.2;
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.18, 6.6, 6), darkMetal);
+    pole.position.set(poleX, 3.3, poleZ);
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(6.8, 0.16, 0.16), darkMetal);
+    arm.position.set(poleX - 3.2, 6.4, poleZ);
+    const housing = new THREE.Mesh(new THREE.BoxGeometry(0.65, 1.85, 0.55), darkMetal);
+    housing.position.set(poleX - 5.4, 5.75, poleZ);
+
+    const redMat = new THREE.MeshBasicMaterial({ color: 0xff2b45 });
+    const ambMat = new THREE.MeshBasicMaterial({ color: 0x3a2a0a });
+    const grnMat = new THREE.MeshBasicMaterial({ color: 0x0b3a22 });
+    const redL = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 8), redMat);
+    redL.position.set(poleX - 5.4, 6.28, poleZ + 0.25);
+    const ambL = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 8), ambMat);
+    ambL.position.set(poleX - 5.4, 5.75, poleZ + 0.25);
+    const grnL = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 8), grnMat);
+    grnL.position.set(poleX - 5.4, 5.22, poleZ + 0.25);
+    g.add(pole, arm, housing, redL, ambL, grnL);
+    animated.trafficSignals.push({ redMat, ambMat, grnMat, phaseOffset: i * 1.9 });
+  }
+
+  // 7. FIRE HYDRANTS & CLEAN SIDEWALK CURBS
+  const hydrantMat = new THREE.MeshStandardMaterial({ color: 0xd93232, roughness: 0.42, metalness: 0.35 });
+  for (const [ix, iz] of majorIntersections) {
+    const hx = ix - 12.8;
+    const hz = iz + 12.8;
+    const hyd = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 0.92, 8), hydrantMat);
+    hyd.position.set(hx, 0.46, hz);
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.23, 8, 6), hydrantMat);
+    cap.position.set(hx, 0.92, hz);
+    g.add(hyd, cap);
+  }
+  // Crisp raised concrete curbs along Paseo Dorado & Central Avenue
+  for (const cz of [189.4, 210.6]) {
+    for (const [x1, x2] of [[-350, 38], [182, 355]]) {
+      const curb = new THREE.Mesh(new THREE.BoxGeometry(x2 - x1, 0.22, 0.5), concreteMat);
+      curb.position.set((x1 + x2) / 2, 0.11, cz);
+      g.add(curb);
+    }
+  }
+
+  // 8. NATURAL PHYSICAL COASTAL PERIMETER (Harbor Seawalls, Coastal Cliffs & Highway Railings — ZERO Invisible Walls!)
+  const cliffMat = new THREE.MeshStandardMaterial({ color: 0x6f675d, roughness: 0.92 });
+  const seawallMat = new THREE.MeshStandardMaterial({ color: 0x7a828c, roughness: 0.8 });
+  // North coastal cliffs & scenic highway parapet wall (z = -448)
+  const northWall = new THREE.Mesh(new THREE.BoxGeometry(930, 3.2, 4.5), seawallMat);
+  northWall.position.set(0, 1.6, -448);
+  g.add(northWall);
+  for (let cx = -440; cx <= 440; cx += 55) {
+    const cliff = new THREE.Mesh(new THREE.DodecahedronGeometry(16 + (Math.abs(cx) % 10), 1), cliffMat);
+    cliff.scale.set(2.2, 1.15, 0.95);
+    cliff.position.set(cx, 6.5, -464);
+    g.add(cliff);
+  }
+  collisionWorld.addRect(0, -448, 936, 6.0, 20, 'perimeter-wall');
+
+  // West coastal seawall & rocky headland (x = -462)
+  const westWall = new THREE.Mesh(new THREE.BoxGeometry(4.5, 2.8, 725), seawallMat);
+  westWall.position.set(-462, 1.4, -88);
+  g.add(westWall);
+  collisionWorld.addRect(-462, -88, 6.0, 730, 16, 'seawall');
+
+  // East harbor concrete seawall (x = 468)
+  const eastWall = new THREE.Mesh(new THREE.BoxGeometry(4.5, 2.8, 725), seawallMat);
+  eastWall.position.set(468, 1.4, -88);
+  g.add(eastWall);
+  collisionWorld.addRect(468, -88, 6.0, 730, 16, 'seawall');
+
+  // Marina Bay Channel Stone Seawall Embankments (framing the bay water under Puente del Sol cleanly)
+  const bayNorthWall = new THREE.Mesh(new THREE.BoxGeometry(142, 1.4, 2.2), seawallMat);
+  bayNorthWall.position.set(110, 0.7, 155);
+  g.add(bayNorthWall);
+  collisionWorld.addRect(110, 155, 142, 2.6, 2.5, 'seawall');
+
+  root.add(g);
 }

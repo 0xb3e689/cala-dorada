@@ -1,4 +1,4 @@
-// Keyboard and mouse input controller with edge-triggered actions and smooth camera look.
+// Keyboard and mouse input controller with Pointer Lock + smooth drag fallback for full 360-degree GTA mouse look.
 
 export class InputController {
   constructor(canvas) {
@@ -13,10 +13,35 @@ export class InputController {
     this.pointerLocked = false;
     this.mouseX = window.innerWidth / 2;
     this.mouseY = window.innerHeight / 2;
+    this._lastClientX = null;
+    this._lastClientY = null;
+    this.canPointerLock = null; // () => boolean set by engine
+    this.allowLeftDragLook = null; // () => boolean set by engine
     this.onAction = null;
     this.onKeyUp = null;
 
     this._bind();
+  }
+
+  requestPointerLockSafe() {
+    try {
+      if (document.pointerLockElement !== this.canvas && this.canvas.requestPointerLock) {
+        const res = this.canvas.requestPointerLock();
+        if (res && typeof res.catch === 'function') res.catch(() => {});
+      }
+    } catch {
+      // Headless or browser restriction; drag fallback remains active
+    }
+  }
+
+  exitPointerLockSafe() {
+    try {
+      if (document.pointerLockElement === this.canvas && document.exitPointerLock) {
+        document.exitPointerLock();
+      }
+    } catch {
+      // Ignore
+    }
   }
 
   _bind() {
@@ -41,11 +66,22 @@ export class InputController {
       this.keys.clear();
       this.mouseDown = false;
       this.rightMouseDown = false;
+      this._lastClientX = null;
+      this._lastClientY = null;
     });
 
     this.canvas.addEventListener('mousedown', (e) => {
-      if (e.button === 0) this.mouseDown = true;
-      if (e.button === 2) this.rightMouseDown = true;
+      this._lastClientX = e.clientX;
+      this._lastClientY = e.clientY;
+      if (e.button === 0) {
+        this.mouseDown = true;
+        if (this.canPointerLock && this.canPointerLock()) {
+          this.requestPointerLockSafe();
+        }
+      }
+      if (e.button === 2) {
+        this.rightMouseDown = true;
+      }
     });
 
     window.addEventListener('mouseup', (e) => {
@@ -56,11 +92,21 @@ export class InputController {
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
     window.addEventListener('mousemove', (e) => {
+      const prevX = this._lastClientX ?? e.clientX;
+      const prevY = this._lastClientY ?? e.clientY;
       this.mouseX = e.clientX;
       this.mouseY = e.clientY;
-      if (document.pointerLockElement === this.canvas || this.rightMouseDown) {
-        this.lookDeltaX += e.movementX;
-        this.lookDeltaY += e.movementY;
+      this._lastClientX = e.clientX;
+      this._lastClientY = e.clientY;
+
+      const isLocked = document.pointerLockElement === this.canvas;
+      const leftDrag = this.mouseDown && (!this.allowLeftDragLook || this.allowLeftDragLook());
+      if (isLocked || this.rightMouseDown || leftDrag) {
+        const dx = (e.movementX !== undefined && (isLocked || e.movementX !== 0)) ? e.movementX : (e.clientX - prevX);
+        const dy = (e.movementY !== undefined && (isLocked || e.movementY !== 0)) ? e.movementY : (e.clientY - prevY);
+        // Clamp giant focus-jump deltas
+        this.lookDeltaX += Math.max(-120, Math.min(120, dx));
+        this.lookDeltaY += Math.max(-120, Math.min(120, dy));
       }
     });
 

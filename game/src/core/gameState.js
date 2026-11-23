@@ -25,6 +25,15 @@ export function createInitialState() {
     maxHealth: 100,
     armor: 80,
     maxArmor: 100,
+    stamina: 100,
+    maxStamina: 100,
+    exhausted: false,
+    exhaustTimer: 0,
+    damageFlash: 0,
+
+    // WASTED / BUSTED cinematic status state
+    statusOverlay: null, // null | { type: 'WASTED' | 'BUSTED', timer: 3.2, total: 3.2 }
+    bustProgress: 0,     // 0..2.5s arrest timer when cornered by police
 
     wantedLevel: 0,
     wantedHeat: 0, // 0..500
@@ -34,10 +43,15 @@ export function createInitialState() {
 
     activeWeaponIdx: 2, // 0..5
     weaponAmmo,
+    reloadTimer: 0,
+    reloadDuration: 0,
+    reloadingWeaponId: null,
     weaponWheelOpen: false,
     weaponWheelHoverIdx: 2,
 
     inVehicle: true,
+    radioBannerTimer: 0,
+    crewActive: false,
     currentDistrictId: 'paseo-dorado',
     districtStanding: standing,
 
@@ -155,17 +169,15 @@ export function computeCompletionPercent(state) {
   const mDone = Object.keys(state.completedMissions).length;
   const pDone = state.ownedProperties ? state.ownedProperties.size : 0;
   const rDone = state.completedRaces.size;
-  const sDone = state.completedStunts.size;
   const gDone = state.collectedShells.size;
   const dTrusted = Object.values(state.districtStanding).filter((v) => v >= 70).length;
 
   const pct =
-    (mDone / MISSIONS.length) * 44 +
-    (pDone / PROPERTIES.length) * 14 +
+    (mDone / MISSIONS.length) * 48 +
+    (pDone / PROPERTIES.length) * 18 +
     (rDone / 4) * 12 +
-    (sDone / 8) * 12 +
-    (gDone / 20) * 10 +
-    (dTrusted / DISTRICTS.length) * 8;
+    (gDone / 20) * 12 +
+    (dTrusted / DISTRICTS.length) * 10;
   return Math.min(100, Math.round(pct * 10) / 10);
 }
 

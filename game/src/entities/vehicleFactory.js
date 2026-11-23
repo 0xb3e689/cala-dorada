@@ -91,13 +91,14 @@ export function createVehicleMesh(typeKey, overrideColor = null) {
   g.add(chassis);
 
   // Sleek sloped aerodynamic nose wedge for supercar / coupe / interceptor
+  let noseMesh = null;
   if (!spec.isSwat) {
     const noseL = isSuper ? L * 0.34 : L * 0.26;
-    const nose = new THREE.Mesh(new THREE.BoxGeometry(W * 0.95, chassisH * 0.72, noseL), paintMat);
-    nose.position.set(0, 0.46 + chassisH * 0.44, L * 0.34);
-    nose.rotation.x = isSuper ? 0.24 : 0.14;
-    nose.castShadow = true;
-    g.add(nose);
+    noseMesh = new THREE.Mesh(new THREE.BoxGeometry(W * 0.95, chassisH * 0.72, noseL), paintMat);
+    noseMesh.position.set(0, 0.46 + chassisH * 0.44, L * 0.34);
+    noseMesh.rotation.x = isSuper ? 0.24 : 0.14;
+    noseMesh.castShadow = true;
+    g.add(noseMesh);
 
     // Front grille intake & carbon splitter
     const grille = new THREE.Mesh(new THREE.BoxGeometry(W * 0.62, 0.2, 0.14), darkMat);
@@ -374,11 +375,89 @@ export function createVehicleMesh(typeKey, overrideColor = null) {
     }
   }
 
+  // Hood engine fire group (erupts when condition reaches 0% during 5-second humane bail-out countdown!)
+  const hoodFireGroup = new THREE.Group();
+  hoodFireGroup.position.set(0, 0.95, L * 0.33);
+  const f1 = new THREE.Mesh(
+    new THREE.DodecahedronGeometry(0.68, 1),
+    new THREE.MeshBasicMaterial({ color: 0xff5a14, transparent: true, opacity: 0.92 })
+  );
+  const f2 = new THREE.Mesh(
+    new THREE.DodecahedronGeometry(0.48, 1),
+    new THREE.MeshBasicMaterial({ color: 0xffe066, transparent: true, opacity: 0.95 })
+  );
+  f2.position.set(0.18, 0.45, -0.1);
+  const f3 = new THREE.Mesh(
+    new THREE.DodecahedronGeometry(0.55, 1),
+    new THREE.MeshBasicMaterial({ color: 0xff8c1a, transparent: true, opacity: 0.88 })
+  );
+  f3.position.set(-0.22, 0.65, 0.12);
+  const fireGlow = makeFlareSprite('#fffbe0', 'rgba(255,112,24,0.88)', 4.2, 0.9);
+  fireGlow.position.set(0, 0.55, 0);
+  const hoodFireLight = new THREE.PointLight(0xff7420, 22, 16, 2.0);
+  hoodFireLight.position.set(0, 1.1, 0);
+  hoodFireGroup.add(f1, f2, f3, fireGlow, hoodFireLight);
+  hoodFireGroup.visible = false;
+  g.add(hoodFireGroup);
+
   g.userData = {
     typeKey, spec, wheels, lightbar, paintMat, rimMat, nitroFlames,
     spoilerGt, spoilerDucktail, underglowGroup, underglowMat,
+    chassis, noseMesh, bumperF, bumperR,
+    baseNoseRotX: noseMesh ? noseMesh.rotation.x : 0,
+    baseNoseY: noseMesh ? noseMesh.position.y : 0,
+    baseColorHex: bodyColor,
+    hoodFireGroup, hoodFireParts: [f1, f2, f3], hoodFireLight,
   };
   return g;
+}
+
+export function updateVehicleDamageVisuals(v, elapsed) {
+  const ud = v?.mesh?.userData;
+  if (!ud) return;
+  const cond = Math.max(0, Math.min(1, v.hp / Math.max(1, v.maxHp)));
+  const dmg = 1 - cond;
+
+  // Gradual visible hood & bumper deformation as damage increases
+  if (ud.noseMesh) {
+    if (dmg > 0.25) {
+      const dent = (dmg - 0.25) / 0.75;
+      ud.noseMesh.rotation.x = ud.baseNoseRotX - dent * 0.22;
+      ud.noseMesh.position.y = ud.baseNoseY + dent * 0.12;
+      ud.noseMesh.rotation.z = dent * 0.06;
+    } else {
+      ud.noseMesh.rotation.x = ud.baseNoseRotX;
+      ud.noseMesh.position.y = ud.baseNoseY;
+      ud.noseMesh.rotation.z = 0;
+    }
+  }
+  if (ud.bumperF) {
+    ud.bumperF.rotation.z = dmg > 0.35 ? (dmg - 0.35) * 0.16 : 0;
+  }
+  if (ud.bumperR) {
+    ud.bumperR.rotation.z = dmg > 0.5 ? -(dmg - 0.5) * 0.14 : 0;
+  }
+
+  // Flickering hood flames during burning countdown
+  if (ud.hoodFireGroup) {
+    const showFire = Boolean(v.burning && !v.exploded);
+    ud.hoodFireGroup.visible = showFire;
+    if (showFire) {
+      ud.hoodFireParts.forEach((p, idx) => {
+        const sc = 0.85 + Math.sin(elapsed * 16 + idx * 2.1) * 0.24;
+        p.scale.set(sc, sc * 1.28, sc);
+        p.rotation.y = elapsed * (2.5 + idx);
+      });
+      if (ud.hoodFireLight) ud.hoodFireLight.intensity = 20 + Math.sin(elapsed * 22) * 6;
+    }
+  }
+
+  // Blackened scorched hull after detonation
+  if (v.exploded && ud.paintMat) {
+    ud.paintMat.color.setHex(0x1b1c20);
+    ud.paintMat.roughness = 0.92;
+    ud.paintMat.metalness = 0.12;
+  }
 }
 
 // Live 3D vehicle customization updater (paint, metallic/matte finish, spoiler, neon underglow, rims, armor)

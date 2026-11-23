@@ -1,16 +1,59 @@
-// City layout, road grid, GPS pathfinder, landmarks, races, stunt ramps, shells, and shops.
+// City layout, road grid, public facilities (Hospital, Police Precinct, Central Park), GPS pathfinder, races, shells, and shops.
 
 import { DISTRICTS, PROPERTIES } from '../core/config.js';
 
 export const ROAD_X = [-340, -180, 0, 180, 340];
 export const ROAD_Z = [-340, -180, 0, 120, 200];
 
+// Real Public Urban Facilities (integrated cleanly into city blocks, zero mid-street stunt ramps!)
+export const PUBLIC_FACILITIES = {
+  hospital: {
+    id: 'cala-hospital',
+    name: 'Cala Dorada General Hospital',
+    shortName: 'HOSPITAL',
+    x: -102,
+    z: -124,
+    spawnX: -102,
+    spawnZ: -96,
+    spawnYaw: 0,
+    carX: -84,
+    carZ: -96,
+    color: '#ff4b5c',
+  },
+  police: {
+    id: 'cdpd-precinct',
+    name: 'CDPD Precinct HQ',
+    shortName: 'CDPD HQ',
+    x: 118,
+    z: -124,
+    spawnX: 118,
+    spawnZ: -96,
+    spawnYaw: 0,
+    carX: 136,
+    carZ: -96,
+    color: '#4ba3ff',
+  },
+  park: {
+    id: 'parque-dorado',
+    name: 'Central Parque Dorado',
+    shortName: 'PARQUE DORADO',
+    x: -90,
+    z: 60,
+    w: 112,
+    d: 76,
+    color: '#2ecc71',
+  },
+};
+
 export const LANDMARKS = [
   { id: 'hotel-solsticio', name: 'HOTEL SOLSTICIO', x: -120, z: 162, district: 'paseo-dorado', type: 'landmark' },
   { id: 'casa-ambar', name: 'CASA AMBAR', x: -255, z: 162, district: 'paseo-dorado', type: 'landmark' },
-  { id: 'mirador-plaza', name: 'MIRADOR VAULT', x: 52, z: -40, district: 'distrito-torre', type: 'vault' },
+  { id: 'mirador-plaza', name: 'MIRADOR PLAZA', x: 52, z: -40, district: 'distrito-torre', type: 'vault' },
   { id: 'puente-del-sol', name: 'PUENTE DEL SOL', x: 110, z: 200, district: 'distrito-torre', type: 'bridge' },
   { id: 'mercado-arch', name: 'MERCADO NOCTURNO', x: -310, z: -55, district: 'mercado-nocturno', type: 'landmark' },
+  { id: 'cala-hospital', name: 'GENERAL HOSPITAL', x: -102, z: -124, district: 'distrito-torre', type: 'hospital' },
+  { id: 'cdpd-precinct', name: 'CDPD PRECINCT HQ', x: 118, z: -124, district: 'distrito-torre', type: 'police' },
+  { id: 'parque-dorado', name: 'PARQUE DORADO', x: -90, z: 60, district: 'distrito-torre', type: 'park' },
   { id: 'rafas-garage', name: "RAFA'S GARAGE", x: 150, z: -242, district: 'barrio-viejo', type: 'garage' },
   { id: 'el-taller', name: 'EL TALLER ARMORY', x: -244, z: -124, district: 'mercado-nocturno', type: 'gunsmith' },
   { id: 'safehouse', name: 'ESMERALDA DOCK', x: 264, z: 182, district: 'bahia-esmeralda', type: 'marina' },
@@ -18,16 +61,8 @@ export const LANDMARKS = [
 
 export const SHOPS = PROPERTIES;
 
-export const STUNT_RAMPS = [
-  { id: 'stunt-1', name: 'Solsticio Boardwalk Leap', x: -185, z: 214, yaw: Math.PI * 0.5, targetDist: 38 },
-  { id: 'stunt-2', name: 'Puente Approach Launch', x: 215, z: 196, yaw: Math.PI * 0.5, targetDist: 44 },
-  { id: 'stunt-3', name: 'Mirador Fountain Vault', x: 0, z: -90, yaw: 0, targetDist: 36 },
-  { id: 'stunt-4', name: 'Puerto Cenit Crane Hop', x: 340, z: -95, yaw: 0, targetDist: 42 },
-  { id: 'stunt-5', name: 'Mercado Alley Skyway', x: -260, z: 0, yaw: Math.PI * 0.5, targetDist: 34 },
-  { id: 'stunt-6', name: 'Villas Terraces Drop', x: -180, z: -260, yaw: Math.PI, targetDist: 46 },
-  { id: 'stunt-7', name: 'Barrio Viejo Plaza Flight', x: 180, z: -220, yaw: 0, targetDist: 38 },
-  { id: 'stunt-8', name: 'Esmeralda Marina Pier Jump', x: 285, z: 196, yaw: Math.PI * 0.5, targetDist: 40 },
-];
+// All out-of-nowhere mid-street stunt jumps removed for realistic drivable city streets!
+export const STUNT_RAMPS = [];
 
 export const STREET_RACES = [
   {
@@ -83,6 +118,21 @@ export const GARDEN_SITES = [
 export const ROOF_REPAIR_SITES = [
   { id: 'roof-viejo-1', name: 'Barrio Viejo Plaza Roof', district: 'barrio-viejo', x: 118, z: -242, totalTiles: 6, payout: 1800 },
   { id: 'roof-viejo-2', name: 'Barrio Viejo Courtyard Roof', district: 'barrio-viejo', x: 198, z: -244, totalTiles: 6, payout: 2100 },
+];
+
+// Canonical 100%-synced Map Legend definitions shared by full Pause Map & Minimap
+export const MAP_LEGEND = [
+  { id: 'player',   label: 'Player',      color: '#ffffff', shape: 'player' },
+  { id: 'mission',  label: 'Mission',     color: '#ffbe55', shape: 'circle' },
+  { id: 'hospital', label: 'Hospital',    color: '#ff4b5c', shape: 'cross' },
+  { id: 'police',   label: 'Police',      color: '#4ba3ff', shape: 'shield' },
+  { id: 'garage',   label: 'Garage',      color: '#34e0c8', shape: 'house' },
+  { id: 'wardrobe', label: 'Wardrobe',    color: '#e879f9', shape: 'house' },
+  { id: 'gunsmith', label: 'Gunsmith',    color: '#ff7846', shape: 'house' },
+  { id: 'property', label: 'Property',    color: '#42e38c', shape: 'house' },
+  { id: 'fishing',  label: 'Fishing',     color: '#38bdf8', shape: 'circle' },
+  { id: 'garden',   label: 'Garden',      color: '#a3e635', shape: 'diamond' },
+  { id: 'roof',     label: 'Roof Repair', color: '#fb923c', shape: 'triangle' },
 ];
 
 export function getDistrictAt(x, z) {

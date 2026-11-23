@@ -1,21 +1,23 @@
-// 6-weapon combat system: dual-core tracers, muzzle flashes, sparks, Los Caimanes enemies, overhead threat state, hit-confirm & floating weapon damage numbers (excluding vehicle ramming).
+// 6-weapon combat system: magazine & reserve reload cycles with 3D reload animations for player, enemies & police,
+// immediate hit reactions/flinch on every shot target, dual-core tracers, sparks, and weapon damage popups (excluding vehicle ramming).
 
 import * as THREE from '../../vendor/three.module.min.js';
 import { WEAPONS } from '../core/config.js';
-import { buildCharacterMesh, poseHumanCombat } from './playerController.js';
+import { buildCharacterMesh, poseHumanCombat, poseHumanReload, poseHumanFlinch } from './playerController.js';
 import { getRadialGlowTexture } from './vehicleFactory.js';
 
 export class CombatSystem {
-  constructor(scene) {
+  constructor(scene, collisionWorld = null) {
     this.scene = scene;
+    this.collisionWorld = collisionWorld;
     this.group = new THREE.Group();
     this.scene.add(this.group);
 
-    this.enemies = []; // { mesh, pos, hp, maxHp, yaw, fireCd, downed, attacking, muzzleTimer, lastHitTimer }
-    this.tracers = []; // { mesh, mats, geos, life, maxLife }
-    this.sparks = [];  // { mesh, vel, life }
-    this.pickups = []; // { mesh, kind, pos }
-    this.damagePopups = []; // { pos: THREE.Vector3, amount, crit, source, life, maxLife, driftX }
+    this.enemies = [];
+    this.tracers = [];
+    this.sparks = [];
+    this.pickups = [];
+    this.damagePopups = [];
     this.hitConfirmTimer = 0;
     this.hitConfirmCrit = false;
     this.fireCooldown = 0;
@@ -49,10 +51,17 @@ export class CombatSystem {
       maxHp,
       yaw,
       fireCd: 0.7 + Math.random() * 1.1,
+      clip: 8,
+      maxClip: 8,
+      reloadTimer: 0,
+      reloadDuration: 1.7,
       downed,
       attacking: !downed,
       muzzleTimer: 0,
       lastHitTimer: 0,
+      flinchTimer: 0,
+      knockdownTimer: 0,
+      knockVel: new THREE.Vector3(),
     };
     this.enemies.push(enemy);
     return enemy;
@@ -63,8 +72,23 @@ export class CombatSystem {
     for (let i = 0; i < count; i++) {
       const ang = (i / count) * Math.PI * 2;
       const r = 10 + (i % 3) * 6;
-      this.spawnEnemy(center.x + Math.cos(ang) * r, center.z + Math.sin(ang) * r, ang + Math.PI, false);
+      const e = this.spawnEnemy(center.x + Math.cos(ang) * r, center.z + Math.sin(ang) * r, ang + Math.PI, false);
+      if (this.collisionWorld) this.collisionWorld.resolveCircle(e.pos, null, 0.65);
     }
+  }
+
+  // Trigger manual or automatic weapon reload for player
+  startPlayerReload(state, audio) {
+    const weapon = WEAPONS[state.activeWeaponIdx];
+    if (!weapon || weapon.melee) return false;
+    if (state.reloadTimer > 0) return false;
+    const ammo = state.weaponAmmo[weapon.id];
+    if (!ammo || ammo.clip >= weapon.clip || ammo.reserve <= 0) return false;
+    state.reloadDuration = weapon.reloadTime ?? 1.6;
+    state.reloadTimer = state.reloadDuration;
+    state.reloadingWeaponId = weapon.id;
+    if (audio) audio.playReload('start');
+    return true;
   }
 
   // Explicitly spawn floating damage numbers ONLY for weapons/melee — NEVER for car ramming (source === 'vehicle')!
@@ -88,7 +112,20 @@ export class CombatSystem {
     const dmg = Math.max(1, Math.round(amount));
     enemy.hp = Math.max(0, enemy.hp - dmg);
     enemy.attacking = true;
-    enemy.lastHitTimer = 0.25;
+    enemy.lastHitTimer = 0.28;
+    enemy.flinchTimer = 0.28;
+
+    // Directional knockback on hit
+    if (opts.dir) {
+      const kb = source === 'vehicle' ? Math.min(16, (opts.impactSpeed ?? 12) * 0.7) : 1.8;
+      enemy.knockVel.set(opts.dir.x * kb, 0, opts.dir.z * kb);
+      if (source === 'vehicle') {
+        enemy.knockdownTimer = Math.max(enemy.knockdownTimer ?? 0, 1.45);
+      } else {
+        enemy.pos.x += opts.dir.x * 0.28;
+        enemy.pos.z += opts.dir.z * 0.28;
+      }
+    }
 
     // Weapon & melee hits trigger hit-confirm crosshair + floating damage popups; vehicle ramming NEVER does!
     if (source !== 'vehicle') {
@@ -103,13 +140,15 @@ export class CombatSystem {
       enemy.attacking = false;
       enemy.mesh.rotation.x = -Math.PI / 2;
       enemy.mesh.position.y = 0.22;
-      enemy.mesh.userData.muzzleFlash.visible = false;
+      if (enemy.mesh.userData.muzzleFlash) enemy.mesh.userData.muzzleFlash.visible = false;
       if (state) {
         state.careerStats.takedowns += 1;
-        state.cash += 350;
-        state.rp += 45;
+        state.cash += enemy.isPolice ? 0 : 350;
+        state.rp += enemy.isPolice ? 25 : 45;
       }
-      this.spawnPickup(enemy.pos.clone(), Math.random() < 0.5 ? 'health' : 'armor');
+      if (!enemy.isPolice) {
+        this.spawnPickup(enemy.pos.clone(), Math.random() < 0.5 ? 'health' : 'armor');
+      }
       if (opts.onEnemyDown) opts.onEnemyDown();
     }
   }
@@ -154,7 +193,6 @@ export class CombatSystem {
         life: 0.28 + Math.random() * 0.2,
       });
     }
-    // Tight focused impact flash sprite
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({
       map: getRadialGlowTexture('#ffffff', 'rgba(255,168,54,0.8)', 'rgba(0,0,0,0)'),
       transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
@@ -176,22 +214,22 @@ export class CombatSystem {
     this.pickups.push({ mesh, kind, pos: mesh.position });
   }
 
-  tryPlayerFire(state, player, aimDir, audio, onEnemyDown, onCrime) {
+  tryPlayerFire(state, player, aimDir, audio, onEnemyDown, onCrime, extraTargets = {}) {
     if (this.fireCooldown > 0) return false;
+    if (state.reloadTimer > 0) return false; // Blocked while reloading!
     const weapon = WEAPONS[state.activeWeaponIdx];
     const ammo = state.weaponAmmo[weapon.id];
 
     if (!weapon.melee) {
       if (ammo.clip <= 0) {
-        if (ammo.reserve > 0) {
-          const take = Math.min(weapon.clip, ammo.reserve);
-          ammo.clip = take;
-          ammo.reserve -= take;
-        } else {
-          return false;
-        }
+        this.startPlayerReload(state, audio);
+        return false;
       }
       ammo.clip -= 1;
+      if (ammo.clip <= 0 && ammo.reserve > 0) {
+        // Trigger realistic reload cycle automatically after final round in magazine
+        this.startPlayerReload(state, audio);
+      }
     }
 
     this.fireCooldown = weapon.fireRate;
@@ -201,7 +239,9 @@ export class CombatSystem {
 
     const origin = player.getMuzzleWorldPos ? player.getMuzzleWorldPos() : player.pos.clone().add(new THREE.Vector3(0, 1.42, 0));
     const pellets = weapon.pellets ?? 1;
-    const hitTotals = new Map(); // Aggregate shotgun pellets per enemy into one crisp damage popup
+    const hitTotals = new Map();
+    const policeOfficers = extraTargets.footOfficers ?? [];
+    const peds = extraTargets.peds ?? [];
 
     for (let p = 0; p < pellets; p++) {
       const dir = aimDir.clone();
@@ -210,52 +250,84 @@ export class CombatSystem {
       dir.z += (Math.random() - 0.5) * weapon.spread;
       dir.normalize();
 
-      let hitEnemy = null;
+      let hitTarget = null;
+      let hitKind = null;
       let bestDist = weapon.range;
       let bestPerp = 99;
-      for (const e of this.enemies) {
-        if (e.downed) continue;
-        const toE = e.pos.clone().add(new THREE.Vector3(0, 1.32, 0)).sub(origin);
-        const proj = toE.dot(dir);
-        if (proj > 0 && proj < bestDist) {
-          const perp = toE.clone().addScaledVector(dir, -proj).length();
-          if (perp < 0.85) {
-            bestDist = proj;
-            bestPerp = perp;
-            hitEnemy = e;
+
+      const checkList = (arr, kind) => {
+        for (const e of arr) {
+          if (e.downed) continue;
+          const pos = e.pos ?? e.mesh.position;
+          const toE = pos.clone().add(new THREE.Vector3(0, 1.32, 0)).sub(origin);
+          const proj = toE.dot(dir);
+          if (proj > 0 && proj < bestDist) {
+            const perp = toE.clone().addScaledVector(dir, -proj).length();
+            if (perp < 0.85) {
+              bestDist = proj;
+              bestPerp = perp;
+              hitTarget = e;
+              hitKind = kind;
+            }
           }
         }
-      }
+      };
+
+      checkList(this.enemies, 'enemy');
+      checkList(policeOfficers, 'police');
+      checkList(peds, 'ped');
 
       const endPoint = origin.clone().addScaledVector(dir, bestDist);
       if (!weapon.melee) {
         this.spawnTracer(origin, endPoint, 0xffe47a, 0.038, 0.14);
       }
-      if (hitEnemy) {
+      if (hitTarget) {
         const isCrit = bestPerp < 0.42 || Math.random() < 0.18;
         const dmg = Math.round(weapon.damage * (isCrit ? 1.55 : 1.0));
-        const prev = hitTotals.get(hitEnemy) ?? { dmg: 0, crit: false, pos: endPoint };
+        const prev = hitTotals.get(hitTarget) ?? { kind: hitKind, dmg: 0, crit: false, pos: endPoint, dir };
         prev.dmg += dmg;
         prev.crit = prev.crit || isCrit;
         prev.pos = endPoint;
-        hitTotals.set(hitEnemy, prev);
+        hitTotals.set(hitTarget, prev);
         this.spawnSparks(endPoint, pellets > 1 ? 3 : 6, 0xff8040);
       }
     }
 
-    for (const [enemy, info] of hitTotals.entries()) {
-      this.applyEnemyDamage(enemy, info.dmg, info.pos, state, {
-        source: weapon.melee ? 'melee' : 'weapon',
-        crit: info.crit,
-        onEnemyDown,
-      });
+    for (const [target, info] of hitTotals.entries()) {
+      if (info.kind === 'ped') {
+        if (extraTargets.onPedShot) extraTargets.onPedShot(target, info.dmg, info.dir);
+      } else {
+        this.applyEnemyDamage(target, info.dmg, info.pos, state, {
+          source: weapon.melee ? 'melee' : 'weapon',
+          crit: info.crit,
+          dir: info.dir,
+          onEnemyDown,
+        });
+      }
     }
     return true;
   }
 
-  update(dt, elapsed, state, playerPos, onPlayerHit) {
+  update(dt, elapsed, state, playerPos, onPlayerHit, audio) {
     if (this.fireCooldown > 0) this.fireCooldown -= dt;
     if (this.hitConfirmTimer > 0) this.hitConfirmTimer = Math.max(0, this.hitConfirmTimer - dt);
+
+    // Player Reload Timer completion
+    if (state.reloadTimer > 0) {
+      state.reloadTimer = Math.max(0, state.reloadTimer - dt);
+      if (state.reloadTimer <= 0 && state.reloadingWeaponId) {
+        const w = WEAPONS.find((x) => x.id === state.reloadingWeaponId);
+        const ammo = w ? state.weaponAmmo[w.id] : null;
+        if (w && ammo && ammo.reserve > 0) {
+          const need = Math.max(0, w.clip - ammo.clip);
+          const take = Math.min(need, ammo.reserve);
+          ammo.clip += take;
+          ammo.reserve -= take;
+        }
+        state.reloadingWeaponId = null;
+        if (audio) audio.playReload('finish');
+      }
+    }
 
     // Update floating damage popups
     for (let i = this.damagePopups.length - 1; i >= 0; i--) {
@@ -311,33 +383,69 @@ export class CombatSystem {
       }
     }
 
-    // Enemy AI
+    // Enemy AI with magazine reload cycle, 3D reload animation, hit reactions & knockdown recovery
     let alive = 0;
     for (const e of this.enemies) {
       if (e.downed) continue;
       alive++;
       if (e.lastHitTimer > 0) e.lastHitTimer = Math.max(0, e.lastHitTimer - dt);
+      if (e.flinchTimer > 0) e.flinchTimer = Math.max(0, e.flinchTimer - dt);
+      if (e.muzzleTimer > 0) {
+        e.muzzleTimer -= dt;
+        if (e.muzzleTimer <= 0 && e.mesh.userData.muzzleFlash) e.mesh.userData.muzzleFlash.visible = false;
+      }
+
+      if (e.knockdownTimer > 0) {
+        e.knockdownTimer = Math.max(0, e.knockdownTimer - dt);
+        e.knockVel.multiplyScalar(Math.pow(0.08, dt));
+        if (this.collisionWorld) this.collisionWorld.moveAndSlide(e.pos, e.knockVel, 0.55, dt);
+        else { e.pos.x += e.knockVel.x * dt; e.pos.z += e.knockVel.z * dt; }
+        const f = e.knockdownTimer < 0.45 ? e.knockdownTimer / 0.45 : 1.0;
+        e.mesh.position.y = 0.18 * f;
+        e.mesh.rotation.x = -Math.PI * 0.48 * f;
+        continue;
+      }
+      e.mesh.rotation.x = 0;
+      e.mesh.position.y = 0;
+
       const dx = playerPos.x - e.pos.x;
       const dz = playerPos.z - e.pos.z;
       const dist = Math.hypot(dx, dz);
+
+      if (e.reloadTimer > 0) {
+        e.reloadTimer = Math.max(0, e.reloadTimer - dt);
+        poseHumanReload(e.mesh, 1 - e.reloadTimer / e.reloadDuration);
+        if (e.reloadTimer <= 0) e.clip = e.maxClip;
+        if (e.flinchTimer > 0) poseHumanFlinch(e.mesh, e.flinchTimer / 0.28);
+        continue;
+      }
+
       if (dist < 56) {
         e.attacking = true;
         e.yaw = Math.atan2(dx, dz);
         e.mesh.rotation.y = e.yaw;
+        poseHumanCombat(e.mesh, true);
         e.fireCd -= dt;
         if (e.fireCd <= 0) {
-          e.fireCd = 1.2 + Math.random() * 1.1;
+          if (e.clip <= 0) {
+            e.reloadTimer = e.reloadDuration;
+            continue;
+          }
+          e.clip -= 1;
+          e.fireCd = 1.15 + Math.random() * 1.0;
           e.muzzleTimer = 0.09;
-          e.mesh.userData.muzzleFlash.visible = true;
+          if (e.mesh.userData.muzzleFlash) e.mesh.userData.muzzleFlash.visible = true;
+          if (audio) audio.playGunshot('pistol');
           const orig = e.pos.clone().add(new THREE.Vector3(0, 1.38, 0));
-          const tgt = playerPos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2.2, 1.2, (Math.random() - 0.5) * 2.2));
+          const tgt = playerPos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2.0, 1.2, (Math.random() - 0.5) * 2.0));
           this.spawnTracer(orig, tgt, 0xff6b4a, 0.036, 0.14);
-          if (Math.random() < 0.35 && onPlayerHit) onPlayerHit(7);
+          if (Math.random() < 0.36 && onPlayerHit) onPlayerHit(9);
+          if (e.clip <= 0) e.reloadTimer = e.reloadDuration;
         }
       }
-      if (e.muzzleTimer > 0) {
-        e.muzzleTimer -= dt;
-        if (e.muzzleTimer <= 0) e.mesh.userData.muzzleFlash.visible = false;
+
+      if (e.flinchTimer > 0) {
+        poseHumanFlinch(e.mesh, e.flinchTimer / 0.28);
       }
     }
     state.missionEnemiesRemaining = alive;

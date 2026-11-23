@@ -1,4 +1,5 @@
-// Procedural Web Audio engine: engine RPM hum, tire screech, police sirens, heli rotor, gunshots, explosions, and 4 radio stations.
+// Procedural Web Audio engine: engine RPM hum, tire screech, police sirens, gunshots, reload clicks,
+// collision crunches, fire crackle, car-hit thuds, exhaustion breathing, pain grunts, WASTED/BUSTED sting, and 4 radio stations.
 
 import { RADIO_STATIONS } from '../core/config.js';
 
@@ -10,6 +11,7 @@ export class SoundAndRadio {
     this.engineGain = null;
     this.sirenOsc = null;
     this.sirenGain = null;
+    this.noiseBuf = null;
     this.radioStep = 0;
     this.radioAccum = 0;
     this.unlocked = false;
@@ -25,13 +27,19 @@ export class SoundAndRadio {
       this.masterGain.gain.value = 0.25;
       this.masterGain.connect(this.ctx.destination);
 
+      // Shared white noise buffer for breath, fire crackle, crashes & bullet impacts
+      const sr = this.ctx.sampleRate;
+      this.noiseBuf = this.ctx.createBuffer(1, sr * 1.0, sr);
+      const data = this.noiseBuf.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+
       // Continuous subtle engine drone
       this.engineOsc = this.ctx.createOscillator();
       this.engineOsc.type = 'sawtooth';
       this.engineOsc.frequency.value = 55;
       const filter = this.ctx.createBiquadFilter();
       filter.type = 'lowpass';
-      filter.frequency.value = 210;
+      filter.frequency.value = 220;
       this.engineGain = this.ctx.createGain();
       this.engineGain.gain.value = 0;
       this.engineOsc.connect(filter);
@@ -59,12 +67,12 @@ export class SoundAndRadio {
     if (this.ctx.state === 'suspended') return;
 
     const sfxVol = state.settings.sfxVolume;
-    const playing = state.mode === 'playing';
+    const playing = state.mode === 'playing' && !state.statusOverlay;
 
     if (this.engineGain && this.engineOsc) {
       const targetGain = playing && state.inVehicle ? 0.14 * sfxVol : 0;
       this.engineGain.gain.setTargetAtTime(targetGain, this.ctx.currentTime, 0.08);
-      this.engineOsc.frequency.setTargetAtTime(52 + vehicleSpeed * 2.6, this.ctx.currentTime, 0.06);
+      this.engineOsc.frequency.setTargetAtTime(52 + vehicleSpeed * 2.4, this.ctx.currentTime, 0.06);
     }
 
     if (this.sirenGain && this.sirenOsc) {
@@ -76,8 +84,8 @@ export class SoundAndRadio {
       }
     }
 
-    // Procedural Radio Station Arpeggiator
-    if (playing && !state.radioMuted && state.settings.radioVolume > 0.02) {
+    // Procedural Radio Station Arpeggiator (plays in vehicle)
+    if (playing && state.inVehicle && !state.radioMuted && state.settings.radioVolume > 0.02) {
       const station = RADIO_STATIONS[state.radioStationIdx];
       const stepDur = 60 / station.bpm / 2;
       this.radioAccum += dt;
@@ -137,6 +145,141 @@ export class SoundAndRadio {
     osc.stop(now + 0.13);
   }
 
+  playReload(stage = 'start') {
+    if (!this.unlocked || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    const clicks = stage === 'start' ? [520, 380] : [760, 1080];
+    clicks.forEach((hz, i) => {
+      const t = now + i * 0.085;
+      const osc = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(hz, t);
+      osc.frequency.exponentialRampToValueAtTime(hz * 0.65, t + 0.05);
+      g.gain.setValueAtTime(0.14, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.055);
+      osc.connect(g);
+      g.connect(this.masterGain);
+      osc.start(t);
+      osc.stop(t + 0.06);
+    });
+  }
+
+  playCrash(speed = 20) {
+    if (!this.unlocked || !this.ctx || !this.noiseBuf) return;
+    const now = this.ctx.currentTime;
+    const intensity = Math.min(1, Math.max(0.2, speed / 45));
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    const filt = this.ctx.createBiquadFilter();
+    filt.type = 'bandpass';
+    filt.frequency.setValueAtTime(320 + intensity * 260, now);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.32 * intensity, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+    src.connect(filt);
+    filt.connect(g);
+    g.connect(this.masterGain);
+    src.start(now);
+    src.stop(now + 0.26);
+  }
+
+  playCarHitHuman(speed = 15) {
+    if (!this.unlocked || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(125, now);
+    osc.frequency.exponentialRampToValueAtTime(34, now + 0.16);
+    g.gain.setValueAtTime(Math.min(0.36, 0.16 + speed * 0.008), now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+    osc.connect(g);
+    g.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.19);
+  }
+
+  playFireCrackle() {
+    if (!this.unlocked || !this.ctx || !this.noiseBuf) return;
+    const now = this.ctx.currentTime;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    const filt = this.ctx.createBiquadFilter();
+    filt.type = 'highpass';
+    filt.frequency.value = 1100;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.11, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+    src.connect(filt);
+    filt.connect(g);
+    g.connect(this.masterGain);
+    src.start(now);
+    src.stop(now + 0.19);
+  }
+
+  playPantBreath() {
+    if (!this.unlocked || !this.ctx || !this.noiseBuf) return;
+    const now = this.ctx.currentTime;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    const filt = this.ctx.createBiquadFilter();
+    filt.type = 'bandpass';
+    filt.frequency.setValueAtTime(680, now);
+    filt.Q.value = 2.2;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.001, now);
+    g.gain.linearRampToValueAtTime(0.075, now + 0.09);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+    src.connect(filt);
+    filt.connect(g);
+    g.connect(this.masterGain);
+    src.start(now);
+    src.stop(now + 0.30);
+  }
+
+  playPlayerPain(hitArmor = false) {
+    if (!this.unlocked || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    // Synthesized pain grunt + impact thud
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = hitArmor ? 'triangle' : 'sawtooth';
+    osc.frequency.setValueAtTime(hitArmor ? 260 : 185, now);
+    osc.frequency.exponentialRampToValueAtTime(hitArmor ? 95 : 78, now + 0.14);
+    const filt = this.ctx.createBiquadFilter();
+    filt.type = 'lowpass';
+    filt.frequency.value = 540;
+    g.gain.setValueAtTime(0.24, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+    osc.connect(filt);
+    filt.connect(g);
+    g.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.17);
+  }
+
+  playWastedBusted(type = 'WASTED') {
+    if (!this.unlocked || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(type === 'WASTED' ? 88 : 112, now);
+    osc.frequency.exponentialRampToValueAtTime(32, now + 1.15);
+    const filt = this.ctx.createBiquadFilter();
+    filt.type = 'lowpass';
+    filt.frequency.setValueAtTime(320, now);
+    filt.frequency.exponentialRampToValueAtTime(70, now + 1.15);
+    g.gain.setValueAtTime(0.42, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 1.25);
+    osc.connect(filt);
+    filt.connect(g);
+    g.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 1.3);
+  }
+
   playExplosion() {
     if (!this.unlocked || !this.ctx) return;
     const now = this.ctx.currentTime;
@@ -145,7 +288,7 @@ export class SoundAndRadio {
     osc.type = 'sawtooth';
     osc.frequency.setValueAtTime(95, now);
     osc.frequency.exponentialRampToValueAtTime(22, now + 0.55);
-    g.gain.setValueAtTime(0.42, now);
+    g.gain.setValueAtTime(0.45, now);
     g.gain.exponentialRampToValueAtTime(0.001, now + 0.58);
     osc.connect(g);
     g.connect(this.masterGain);

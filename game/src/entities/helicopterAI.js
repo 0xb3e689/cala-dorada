@@ -78,6 +78,11 @@ export class HelicopterAI {
     this.scene.add(this.groundPool);
 
     this.orbitAngle = 0.6;
+    this.vel = new THREE.Vector3();
+    this.yaw = 0;
+    this.bankRoll = 0;
+    this.spotTargetPos = new THREE.Vector3();
+    this.spotInitialized = false;
   }
 
   _buildHeliMesh() {
@@ -306,12 +311,14 @@ export class HelicopterAI {
     this.mesh.userData.strobeRed.visible = true;
     this.mesh.userData.strobeBlue.visible = true;
     this.mesh.updateMatrixWorld(true);
-    this._aimSpotlight(targetPos);
+    this.spotTargetPos.copy(targetPos);
+    this.spotInitialized = true;
+    this._aimSpotlightInstant(targetPos);
     this.groundPool.visible = true;
     this.groundPool.position.set(targetPos.x, 0.14, targetPos.z);
   }
 
-  _aimSpotlight(targetPos) {
+  _aimSpotlightInstant(targetPos) {
     const { spotOrigin } = this.mesh.userData;
     const worldOrigin = new THREE.Vector3();
     spotOrigin.getWorldPosition(worldOrigin);
@@ -321,21 +328,97 @@ export class HelicopterAI {
     spotOrigin.quaternion.copy(q);
   }
 
+  // Smooth angular-velocity-damped searchlight gimbal so beam sweeps & lags realistically behind sharp player turns!
+  _aimSpotlightSmooth(targetPos, dt) {
+    if (!this.spotInitialized) {
+      this.spotTargetPos.copy(targetPos);
+      this.spotInitialized = true;
+    }
+    const trackRate = 1.9; // Smooth pursuit lag
+    const lagAlpha = 1 - Math.exp(-trackRate * dt);
+    this.spotTargetPos.lerp(targetPos, lagAlpha);
+
+    const { spotOrigin } = this.mesh.userData;
+    const worldOrigin = new THREE.Vector3();
+    spotOrigin.getWorldPosition(worldOrigin);
+    const dir = new THREE.Vector3().subVectors(this.spotTargetPos, worldOrigin).normalize();
+    const localDir = dir.clone().applyQuaternion(this.mesh.quaternion.clone().invert());
+    const desiredQ = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), localDir);
+
+    // Cap gimbal angular slew rate (~1.2 rad/s) so spotlight never snaps instantaneously
+    const maxStepRad = 1.25 * dt;
+    spotOrigin.quaternion.rotateTowards(desiredQ, maxStepRad);
+    this.groundPool.position.set(this.spotTargetPos.x, 0.14, this.spotTargetPos.z);
+  }
+
   update(dt, elapsed, state, targetPos) {
+    const wasVis = this.mesh.visible;
     this.mesh.visible = state.airUnitDeployed;
     this.groundPool.visible = state.airUnitDeployed && state.signalJamTimer <= 0;
-    if (!state.airUnitDeployed) return;
+    if (!state.airUnitDeployed) {
+      this.spotInitialized = false;
+      return;
+    }
 
-    this.orbitAngle += dt * 0.42;
-    const radius = 34;
+    if (!wasVis) {
+      // Initial smooth approach spawn from nearby airspace
+      this.mesh.position.set(targetPos.x + 65, 32, targetPos.z - 55);
+      this.vel.set(0, 0, 0);
+      this.spotTargetPos.copy(targetPos);
+      this.spotInitialized = true;
+    }
+
+    // Weighty, rational banking orbit at ~20-26 m/s (never jerky or teleport-fast!)
+    this.orbitAngle += dt * 0.44;
+    const radius = 44;
     const desiredX = targetPos.x + Math.cos(this.orbitAngle) * radius;
     const desiredZ = targetPos.z + Math.sin(this.orbitAngle) * radius;
-    const desiredY = 25 + Math.sin(elapsed * 1.4) * 2.0;
+    const desiredY = 27 + Math.sin(elapsed * 1.1) * 1.8;
 
-    this.mesh.position.x = THREE.MathUtils.lerp(this.mesh.position.x, desiredX, dt * 1.6);
-    this.mesh.position.z = THREE.MathUtils.lerp(this.mesh.position.z, desiredZ, dt * 1.6);
-    this.mesh.position.y = THREE.MathUtils.lerp(this.mesh.position.y, desiredY, dt * 2.0);
-    this.mesh.lookAt(targetPos.x, this.mesh.position.y - 4, targetPos.z);
+    const toDesX = desiredX - this.mesh.position.x;
+    const toDesZ = desiredZ - this.mesh.position.z;
+    const toDesY = desiredY - this.mesh.position.y;
+    const dist = Math.hypot(toDesX, toDesZ) || 1;
+    const cruiseSpeed = Math.min(25.5, Math.max(12, dist * 0.72));
+    const desVx = (toDesX / dist) * cruiseSpeed;
+    const desVz = (toDesZ / dist) * cruiseSpeed;
+    const desVy = Math.max(-5, Math.min(5, toDesY * 1.2));
+
+    const accel = 1 - Math.exp(-1.8 * dt);
+    const prevVx = this.vel.x;
+    const prevVz = this.vel.z;
+    this.vel.x = THREE.MathUtils.lerp(this.vel.x, desVx, accel);
+    this.vel.z = THREE.MathUtils.lerp(this.vel.z, desVz, accel);
+    this.vel.y = THREE.MathUtils.lerp(this.vel.y, desVy, accel);
+
+    // Clamp horizontal flight speed strictly to 26 m/s
+    const hSpd = Math.hypot(this.vel.x, this.vel.z);
+    if (hSpd > 26.0) {
+      const s = 26.0 / hSpd;
+      this.vel.x *= s;
+      this.vel.z *= s;
+    }
+
+    this.mesh.position.addScaledVector(this.vel, dt);
+
+    // Smooth yaw toward flight/target direction + realistic aerodynamic banking roll & forward nose pitch
+    const lookDx = targetPos.x - this.mesh.position.x;
+    const lookDz = targetPos.z - this.mesh.position.z;
+    const desiredYaw = Math.atan2(lookDx, lookDz);
+    let yawDiff = desiredYaw - this.yaw;
+    while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
+    while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
+    this.yaw += Math.max(-1.6 * dt, Math.min(1.6 * dt, yawDiff * 2.2 * dt));
+
+    const latAcc = ((this.vel.x - prevVx) * Math.cos(this.yaw) - (this.vel.z - prevVz) * Math.sin(this.yaw)) / Math.max(0.005, dt);
+    const desiredBank = Math.max(-0.28, Math.min(0.28, -latAcc * 0.028));
+    this.bankRoll = THREE.MathUtils.lerp(this.bankRoll, desiredBank, Math.min(1, dt * 3.5));
+
+    this.mesh.rotation.order = 'YXZ';
+    this.mesh.rotation.y = this.yaw;
+    this.mesh.rotation.x = Math.min(0.18, hSpd * 0.006);
+    this.mesh.rotation.z = this.bankRoll;
+    this.mesh.updateMatrixWorld(true);
 
     const { mainRotor, tailRotor, strobeRed, strobeBlue, tailBeacon, cone } = this.mesh.userData;
     mainRotor.rotation.y += dt * 28;
@@ -348,8 +431,7 @@ export class HelicopterAI {
     const jammed = state.signalJamTimer > 0;
     cone.visible = !jammed;
     if (!jammed) {
-      this._aimSpotlight(targetPos);
-      this.groundPool.position.set(targetPos.x, 0.14, targetPos.z);
+      this._aimSpotlightSmooth(targetPos, dt);
     }
   }
 }
