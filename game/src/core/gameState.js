@@ -27,21 +27,28 @@ export function createInitialState() {
     maxArmor: 100,
     stamina: 100,
     maxStamina: 100,
+    oxygen: 100,
+    maxOxygen: 100,
+    swimming: false,
+    diving: false,
+    submergeDepth: 0,
     exhausted: false,
     exhaustTimer: 0,
     damageFlash: 0,
 
     // WASTED / BUSTED cinematic status state
-    statusOverlay: null, // null | { type: 'WASTED' | 'BUSTED', timer: 3.2, total: 3.2 }
+    statusOverlay: null, // null | { type: 'WASTED' | 'BUSTED', timer: 3.4, total: 3.4 }
     bustProgress: 0,     // 0..2.5s arrest timer when cornered by police
 
     wantedLevel: 0,
-    wantedHeat: 0, // 0..500
+    wantedHeat: 0, // 0..600 (1★=60, 2★=160, 3★=290, 4★=420, 5★=560)
     evadeTimer: 0,
+    hiddenFromPolice: false,
     airUnitDeployed: false,
     signalJamTimer: 0,
 
     activeWeaponIdx: 2, // 0..5
+    activeWeaponId: WEAPONS[2].id,
     weaponAmmo,
     reloadTimer: 0,
     reloadDuration: 0,

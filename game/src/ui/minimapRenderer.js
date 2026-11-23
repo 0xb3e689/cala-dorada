@@ -2,7 +2,8 @@
 
 import { DISTRICTS, PROPERTIES } from '../core/config.js';
 import {
-  ROAD_X, ROAD_Z, PUBLIC_FACILITIES, FISHING_SPOTS, GARDEN_SITES, ROOF_REPAIR_SITES, computeGpsPath,
+  ROAD_X, ROAD_Z, PUBLIC_FACILITIES, FISHING_SPOTS, GARDEN_SITES, ROOF_REPAIR_SITES,
+  getRiverCenterX, getRiverHalfWidth, RIVER_BRIDGES, computeGpsPath,
 } from '../world/cityPlan.js';
 
 function getPropertyMarkerColor(prop) {
@@ -39,9 +40,24 @@ export class MinimapRenderer {
     ctx.fillRect(0, Math.max(0, seaTop), W, H);
 
     // Bay channel under Puente del Sol
-    const bayA = toScreen(40, 156);
-    const bayB = toScreen(180, 270);
+    const bayA = toScreen(52, 156);
+    const bayB = toScreen(168, 274);
     ctx.fillRect(bayA.x, bayA.y, bayB.x - bayA.x, bayB.y - bayA.y);
+
+    // Navigable Río Dorado River winding from northern hills into Marina Bay
+    ctx.fillStyle = '#0e4963';
+    ctx.beginPath();
+    for (let z = -438; z <= 165; z += 18) {
+      const s = toScreen(getRiverCenterX(z) - getRiverHalfWidth(z), z);
+      if (z === -438) ctx.moveTo(s.x, s.y);
+      else ctx.lineTo(s.x, s.y);
+    }
+    for (let z = 165; z >= -438; z -= 18) {
+      const s = toScreen(getRiverCenterX(z) + getRiverHalfWidth(z), z);
+      ctx.lineTo(s.x, s.y);
+    }
+    ctx.closePath();
+    ctx.fill();
 
     // Beach strip
     const sandTop = toScreen(0, 224).y;
@@ -81,15 +97,17 @@ export class MinimapRenderer {
     }
     ctx.stroke();
 
-    // Puente del Sol bridge highlight
-    const brA = toScreen(40, 200);
-    const brB = toScreen(180, 200);
-    ctx.strokeStyle = '#e04f44';
-    ctx.lineWidth = 6;
-    ctx.beginPath();
-    ctx.moveTo(brA.x, brA.y);
-    ctx.lineTo(brB.x, brB.y);
-    ctx.stroke();
+    // Puente del Sol & Río Dorado river bridges highlight
+    for (const br of RIVER_BRIDGES) {
+      const brA = toScreen(br.x1, br.z);
+      const brB = toScreen(br.x2, br.z);
+      ctx.strokeStyle = br.isMain ? '#e04f44' : '#7b8fa8';
+      ctx.lineWidth = br.isMain ? 6 : 5;
+      ctx.beginPath();
+      ctx.moveTo(brA.x, brA.y);
+      ctx.lineTo(brB.x, brB.y);
+      ctx.stroke();
+    }
 
     // GPS Route Line
     const goal = state.customWaypoint ?? missionTarget;

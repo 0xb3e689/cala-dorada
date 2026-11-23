@@ -1,5 +1,7 @@
-// Procedural Web Audio engine: engine RPM hum, tire screech, police sirens, gunshots, reload clicks,
-// collision crunches, fire crackle, car-hit thuds, exhaustion breathing, pain grunts, WASTED/BUSTED sting, and 4 radio stations.
+// Procedural Web Audio engine: engine RPM hum, police sirens, distinct 6-weapon gunshot/melee SFX,
+// metallic car-hit ricochets, reload clicks, collision crunches, fire crackle, car-hit thuds,
+// vocal-formant "ouch!" / "ugh!" pain exclamation, underwater low-pass muffling, water splash & bubbles,
+// WASTED/BUSTED sting, and 4 radio stations.
 
 import { RADIO_STATIONS } from '../core/config.js';
 
@@ -7,6 +9,7 @@ export class SoundAndRadio {
   constructor() {
     this.ctx = null;
     this.masterGain = null;
+    this.underwaterFilter = null;
     this.engineOsc = null;
     this.engineGain = null;
     this.sirenOsc = null;
@@ -15,6 +18,8 @@ export class SoundAndRadio {
     this.radioStep = 0;
     this.radioAccum = 0;
     this.unlocked = false;
+    this.lastPainPlayedAt = 0;
+    this._painToggle = 0;
   }
 
   unlock() {
@@ -23,11 +28,18 @@ export class SoundAndRadio {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return;
       this.ctx = new AudioCtx();
+
+      this.underwaterFilter = this.ctx.createBiquadFilter();
+      this.underwaterFilter.type = 'lowpass';
+      this.underwaterFilter.frequency.value = 18000;
+      this.underwaterFilter.Q.value = 0.7;
+
       this.masterGain = this.ctx.createGain();
       this.masterGain.gain.value = 0.25;
-      this.masterGain.connect(this.ctx.destination);
+      this.masterGain.connect(this.underwaterFilter);
+      this.underwaterFilter.connect(this.ctx.destination);
 
-      // Shared white noise buffer for breath, fire crackle, crashes & bullet impacts
+      // Shared white noise buffer for breath, gun cracks, fire crackle, splashes & impacts
       const sr = this.ctx.sampleRate;
       this.noiseBuf = this.ctx.createBuffer(1, sr * 1.0, sr);
       const data = this.noiseBuf.getChannelData(0);
@@ -68,6 +80,12 @@ export class SoundAndRadio {
 
     const sfxVol = state.settings.sfxVolume;
     const playing = state.mode === 'playing' && !state.statusOverlay;
+
+    // Underwater audio muffling filter
+    if (this.underwaterFilter) {
+      const targetCutoff = (playing && state.diving) ? 380 : 18000;
+      this.underwaterFilter.frequency.setTargetAtTime(targetCutoff, this.ctx.currentTime, 0.1);
+    }
 
     if (this.engineGain && this.engineOsc) {
       const targetGain = playing && state.inVehicle ? 0.14 * sfxVol : 0;
@@ -131,18 +149,94 @@ export class SoundAndRadio {
   playGunshot(weaponId) {
     if (!this.unlocked || !this.ctx) return;
     const now = this.ctx.currentTime;
+
+    // Melee whoosh / bat crack
+    if (weaponId === 'fists' || weaponId === 'bat') {
+      if (this.noiseBuf) {
+        const src = this.ctx.createBufferSource();
+        src.buffer = this.noiseBuf;
+        const filt = this.ctx.createBiquadFilter();
+        filt.type = 'bandpass';
+        filt.frequency.setValueAtTime(weaponId === 'bat' ? 920 : 520, now);
+        filt.frequency.exponentialRampToValueAtTime(220, now + 0.11);
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(weaponId === 'bat' ? 0.22 : 0.16, now);
+        g.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+        src.connect(filt);
+        filt.connect(g);
+        g.connect(this.masterGain);
+        src.start(now);
+        src.stop(now + 0.13);
+      }
+      if (weaponId === 'bat') {
+        const ping = this.ctx.createOscillator();
+        const pg = this.ctx.createGain();
+        ping.type = 'triangle';
+        ping.frequency.setValueAtTime(640, now);
+        ping.frequency.exponentialRampToValueAtTime(240, now + 0.08);
+        pg.gain.setValueAtTime(0.14, now);
+        pg.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+        ping.connect(pg);
+        pg.connect(this.masterGain);
+        ping.start(now);
+        ping.stop(now + 0.1);
+      }
+      return;
+    }
+
+    // Distinct firearm synthesis per weapon
+    const cfg = {
+      pistol:  { hz: 240, endHz: 52, dur: 0.11, noiseHz: 1500, vol: 0.26 },
+      smg:     { hz: 320, endHz: 75, dur: 0.075, noiseHz: 2100, vol: 0.22 },
+      shotgun: { hz: 125, endHz: 26, dur: 0.24, noiseHz: 780,  vol: 0.42 },
+      carbine: { hz: 190, endHz: 40, dur: 0.14, noiseHz: 1350, vol: 0.31 },
+    }[weaponId] ?? { hz: 220, endHz: 44, dur: 0.12, noiseHz: 1400, vol: 0.26 };
+
     const osc = this.ctx.createOscillator();
     const g = this.ctx.createGain();
-    osc.type = 'square';
-    const startHz = weaponId === 'shotgun' ? 140 : weaponId === 'smg' ? 280 : 210;
-    osc.frequency.setValueAtTime(startHz, now);
-    osc.frequency.exponentialRampToValueAtTime(38, now + 0.11);
-    g.gain.setValueAtTime(0.28, now);
-    g.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+    osc.type = weaponId === 'shotgun' ? 'sawtooth' : 'square';
+    osc.frequency.setValueAtTime(cfg.hz, now);
+    osc.frequency.exponentialRampToValueAtTime(cfg.endHz, now + cfg.dur);
+    g.gain.setValueAtTime(cfg.vol, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + cfg.dur + 0.02);
     osc.connect(g);
     g.connect(this.masterGain);
     osc.start(now);
-    osc.stop(now + 0.13);
+    osc.stop(now + cfg.dur + 0.03);
+
+    if (this.noiseBuf) {
+      const n = this.ctx.createBufferSource();
+      n.buffer = this.noiseBuf;
+      const nf = this.ctx.createBiquadFilter();
+      nf.type = 'bandpass';
+      nf.frequency.setValueAtTime(cfg.noiseHz, now);
+      nf.Q.value = weaponId === 'shotgun' ? 0.7 : 1.2;
+      const ng = this.ctx.createGain();
+      ng.gain.setValueAtTime(cfg.vol * 0.85, now);
+      ng.gain.exponentialRampToValueAtTime(0.001, now + cfg.dur * 1.15);
+      n.connect(nf);
+      nf.connect(ng);
+      ng.connect(this.masterGain);
+      n.start(now);
+      n.stop(now + cfg.dur * 1.2 + 0.02);
+    }
+  }
+
+  playMetalHit() {
+    if (!this.unlocked || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = 'triangle';
+    const base = 1150 + Math.random() * 480;
+    osc.frequency.setValueAtTime(base, now);
+    osc.frequency.exponentialRampToValueAtTime(base * 0.45, now + 0.085);
+    g.gain.setValueAtTime(0.20, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.095);
+    osc.connect(g);
+    g.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.1);
   }
 
   playReload(stage = 'start') {
@@ -200,6 +294,43 @@ export class SoundAndRadio {
     osc.stop(now + 0.19);
   }
 
+  playWaterSplash(intensity = 0.6) {
+    if (!this.unlocked || !this.ctx || !this.noiseBuf) return;
+    const now = this.ctx.currentTime;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    const filt = this.ctx.createBiquadFilter();
+    filt.type = 'bandpass';
+    filt.frequency.setValueAtTime(950, now);
+    filt.frequency.exponentialRampToValueAtTime(340, now + 0.24);
+    filt.Q.value = 1.4;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.14 * intensity, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.26);
+    src.connect(filt);
+    filt.connect(g);
+    g.connect(this.masterGain);
+    src.start(now);
+    src.stop(now + 0.28);
+  }
+
+  playUnderwaterBubble() {
+    if (!this.unlocked || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = 'sine';
+    const startHz = 280 + Math.random() * 160;
+    osc.frequency.setValueAtTime(startHz, now);
+    osc.frequency.exponentialRampToValueAtTime(startHz * 2.1, now + 0.09);
+    g.gain.setValueAtTime(0.08, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+    osc.connect(g);
+    g.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.11);
+  }
+
   playFireCrackle() {
     if (!this.unlocked || !this.ctx || !this.noiseBuf) return;
     const now = this.ctx.currentTime;
@@ -238,25 +369,83 @@ export class SoundAndRadio {
     src.stop(now + 0.30);
   }
 
+  // Procedural vocal-formant "ouch!" / "ugh!" exclamation when player is shot or injured
   playPlayerPain(hitArmor = false) {
+    this.lastPainPlayedAt = performance.now();
     if (!this.unlocked || !this.ctx) return;
     const now = this.ctx.currentTime;
-    // Synthesized pain grunt + impact thud
-    const osc = this.ctx.createOscillator();
-    const g = this.ctx.createGain();
-    osc.type = hitArmor ? 'triangle' : 'sawtooth';
-    osc.frequency.setValueAtTime(hitArmor ? 260 : 185, now);
-    osc.frequency.exponentialRampToValueAtTime(hitArmor ? 95 : 78, now + 0.14);
-    const filt = this.ctx.createBiquadFilter();
-    filt.type = 'lowpass';
-    filt.frequency.value = 540;
-    g.gain.setValueAtTime(0.24, now);
-    g.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
-    osc.connect(filt);
-    filt.connect(g);
-    g.connect(this.masterGain);
-    osc.start(now);
-    osc.stop(now + 0.17);
+    const isOuch = (this._painToggle++ % 2 === 0);
+    const pitchMul = 0.92 + Math.random() * 0.16;
+
+    // 1. Glottal pulse/sawtooth vocal cord excitation with natural pitch contour
+    const glottis = this.ctx.createOscillator();
+    glottis.type = 'sawtooth';
+    const f0Start = (isOuch ? 168 : 148) * pitchMul;
+    const f0Peak = (isOuch ? 186 : 158) * pitchMul;
+    const f0End = (isOuch ? 112 : 94) * pitchMul;
+    glottis.frequency.setValueAtTime(f0Start, now);
+    glottis.frequency.linearRampToValueAtTime(f0Peak, now + 0.032);
+    glottis.frequency.exponentialRampToValueAtTime(f0End, now + 0.17);
+
+    // 2. Dual vocal formant bandpass filters (F1 & F2 diphthong sweep: "aa -> oo" for "ouch!", "uh" for "ugh!")
+    const f1 = this.ctx.createBiquadFilter();
+    f1.type = 'bandpass';
+    f1.Q.value = 5.2;
+    f1.frequency.setValueAtTime(isOuch ? 760 : 610, now);
+    f1.frequency.exponentialRampToValueAtTime(isOuch ? 410 : 470, now + 0.13);
+
+    const f2 = this.ctx.createBiquadFilter();
+    f2.type = 'bandpass';
+    f2.Q.value = 6.4;
+    f2.frequency.setValueAtTime(isOuch ? 1280 : 1140, now);
+    f2.frequency.exponentialRampToValueAtTime(isOuch ? 840 : 920, now + 0.13);
+
+    const voiceGain = this.ctx.createGain();
+    voiceGain.gain.setValueAtTime(0.001, now);
+    voiceGain.gain.linearRampToValueAtTime(0.36, now + 0.018);
+    voiceGain.gain.setValueAtTime(0.32, now + 0.085);
+    voiceGain.gain.exponentialRampToValueAtTime(0.001, now + 0.19);
+
+    glottis.connect(f1);
+    glottis.connect(f2);
+    f1.connect(voiceGain);
+    f2.connect(voiceGain);
+    voiceGain.connect(this.masterGain);
+    glottis.start(now);
+    glottis.stop(now + 0.20);
+
+    // 3. Brief "-ch" / breathy consonant release burst at end of "ouch!"
+    if (this.noiseBuf) {
+      const cons = this.ctx.createBufferSource();
+      cons.buffer = this.noiseBuf;
+      const cf = this.ctx.createBiquadFilter();
+      cf.type = 'bandpass';
+      cf.frequency.setValueAtTime(isOuch ? 2900 : 1450, now + 0.11);
+      cf.Q.value = 2.4;
+      const cg = this.ctx.createGain();
+      const tCons = now + (isOuch ? 0.115 : 0.09);
+      cg.gain.setValueAtTime(0.001, tCons);
+      cg.gain.linearRampToValueAtTime(isOuch ? 0.16 : 0.10, tCons + 0.012);
+      cg.gain.exponentialRampToValueAtTime(0.001, tCons + 0.065);
+      cons.connect(cf);
+      cf.connect(cg);
+      cg.connect(this.masterGain);
+      cons.start(tCons);
+      cons.stop(tCons + 0.07);
+    }
+
+    // 4. Short bullet impact thud (crisper kevlar thump on armor, deeper body thump on HP)
+    const thud = this.ctx.createOscillator();
+    const tg = this.ctx.createGain();
+    thud.type = hitArmor ? 'triangle' : 'sine';
+    thud.frequency.setValueAtTime(hitArmor ? 240 : 130, now);
+    thud.frequency.exponentialRampToValueAtTime(hitArmor ? 85 : 46, now + 0.085);
+    tg.gain.setValueAtTime(0.18, now);
+    tg.gain.exponentialRampToValueAtTime(0.001, now + 0.095);
+    thud.connect(tg);
+    tg.connect(this.masterGain);
+    thud.start(now);
+    thud.stop(now + 0.10);
   }
 
   playWastedBusted(type = 'WASTED') {

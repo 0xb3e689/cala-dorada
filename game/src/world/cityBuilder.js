@@ -1,8 +1,11 @@
 // 3D open-world city builder: non-boxy Art-Deco & skyline architecture, lush tropical beaches & coastal props, Puente del Sol, Mercado Nocturno cobblestones & lanterns, and 8 interactive city properties.
 
 import * as THREE from '../../vendor/three.module.min.js';
-import { WORLD, PROPERTIES } from '../core/config.js';
-import { ROAD_X, ROAD_Z, PUBLIC_FACILITIES, GOLDEN_SHELLS, FISHING_SPOTS, GARDEN_SITES, ROOF_REPAIR_SITES } from './cityPlan.js';
+import { WORLD, PROPERTIES, VEHICLES } from '../core/config.js';
+import {
+  ROAD_X, ROAD_Z, PUBLIC_FACILITIES, GOLDEN_SHELLS, FISHING_SPOTS, GARDEN_SITES, ROOF_REPAIR_SITES,
+  getRiverCenterX, getRiverHalfWidth, RIVER_BRIDGES, COVER_BUILDINGS,
+} from './cityPlan.js';
 import { CollisionWorld } from './collisionWorld.js';
 import { createSignTexture } from './textures.js';
 import { getRadialGlowTexture, createVehicleMesh } from '../entities/vehicleFactory.js';
@@ -21,6 +24,7 @@ export function buildCalaDoradaCity(scene, textures) {
   root.name = 'CalaDoradaWorld';
   const collisionWorld = new CollisionWorld(48);
   const colliders = collisionWorld.colliders;
+  const parkedVehicles = [];
   const animated = {
     ocean: null,
     palms: [],
@@ -79,11 +83,14 @@ export function buildCalaDoradaCity(scene, textures) {
   root.add(ocean);
   animated.ocean = ocean;
 
-  // Marina Channel (bay water cutting right under Puente del Sol)
-  const bayWater = new THREE.Mesh(new THREE.PlaneGeometry(148, 220), waterMat);
+  // Marina Channel (bay water cutting right under Puente del Sol, leaving dry underpass embankments on [40..52] & [168..180])
+  const bayWater = new THREE.Mesh(new THREE.PlaneGeometry(118, 220), waterMat);
   bayWater.rotation.x = -Math.PI / 2;
   bayWater.position.set(110, 0.03, 240);
   root.add(bayWater);
+
+  // Scenic Navigable River: RÍO DORADO winding from northern hills (z=-438) down into Marina Bay!
+  buildRioDorado(root, waterMat, sandMat);
 
   // Focused Golden Sunset Shimmer Path across the Ocean
   const shimmerMat = new THREE.MeshBasicMaterial({
@@ -124,17 +131,25 @@ export function buildCalaDoradaCity(scene, textures) {
     root.add(mesh);
   }
   for (const rz of ROAD_Z) {
-    const len = 760;
-    const mat = roadMat.clone();
-    mat.map = textures.road.clone();
-    mat.map.needsUpdate = true;
-    mat.map.repeat.set(1, len / 26);
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(roadW, len), mat);
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.rotation.z = Math.PI / 2;
-    mesh.position.set(10, 0.09, rz);
-    mesh.receiveShadow = true;
-    root.add(mesh);
+    // Split horizontal avenues cleanly around elevated bridge spans so the river & hollow underpasses show cleanly underneath!
+    const bridge = RIVER_BRIDGES.find((b) => Math.abs(b.z - rz) < 2);
+    const segments = bridge
+      ? [[-370, bridge.x1 + 1], [bridge.x2 - 1, 390]]
+      : [[-370, 390]];
+    for (const [xStart, xEnd] of segments) {
+      const len = xEnd - xStart;
+      if (len <= 2) continue;
+      const mat = roadMat.clone();
+      mat.map = textures.road.clone();
+      mat.map.needsUpdate = true;
+      mat.map.repeat.set(1, len / 26);
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(roadW, len), mat);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.rotation.z = Math.PI / 2;
+      mesh.position.set((xStart + xEnd) * 0.5, 0.09, rz);
+      mesh.receiveShadow = true;
+      root.add(mesh);
+    }
   }
 
   // Intersection crosswalks
@@ -148,8 +163,9 @@ export function buildCalaDoradaCity(scene, textures) {
     }
   }
 
-  // 4. Iconic Red-and-Gold Cable-Stayed Bridge: PUENTE DEL SOL (with solid guardrails & tower colliders)
-  buildPuenteDelSol(root, 110, 200, collisionWorld, animated);
+  // 4. Elevated Bridges with Hollow Passable Underpasses (Puente del Sol + Río Dorado River Bridges!)
+  buildPuenteDelSol(root, 110, 200, collisionWorld, animated, textures);
+  buildRiverBridges(root, collisionWorld, animated, textures);
 
   // 5. Detailed Non-Boxy Architectural City Builder
   const trimStoneMat = new THREE.MeshStandardMaterial({ color: 0xf7e3c4, roughness: 0.48, metalness: 0.18 });
@@ -444,11 +460,11 @@ export function buildCalaDoradaCity(scene, textures) {
   }, { style: 'tower', spire: true });
   // Note: (-102,-124) hosts Cala Dorada General Hospital, (118,-124) hosts CDPD Precinct HQ, and (-90,60) hosts Central Parque Dorado!
 
-  // Barrio Viejo Properties: Dante's Loft (Safehouse) & Rafa's Chop & Spray (Garage)
-  addBuilding(92, -264, 30, 24, 18, textures.facadeArtDecoCoral, 0xb8593c, {
+  // Barrio Viejo Properties: Dante's Loft (Safehouse) & Rafa's Chop & Spray (Garage — framing Río Dorado gorge!)
+  addBuilding(86, -264, 30, 24, 18, textures.facadeArtDecoCoral, 0xb8593c, {
     text: "DANTE'S LOFT", bg: '#1b1322', fg: '#ffd46e', accent: '#ff7846', rooftop: true, southFace: true, width: 24, height: 4.8,
   }, { style: 'villa' });
-  addBuilding(150, -264, 34, 24, 14, textures.facadeArtDecoCream, 0x8f5b3c, {
+  addBuilding(156, -264, 30, 24, 14, textures.facadeArtDecoCream, 0x8f5b3c, {
     text: "RAFA'S GARAGE", bg: '#1a1414', fg: '#ffbe55', accent: '#ff5252', rooftop: true, southFace: true, width: 26, height: 5.2,
   }, { style: 'market' });
   addBuilding(-244, -142, 28, 22, 16, textures.facadeMarket, 0x5c362e, {
@@ -494,9 +510,9 @@ export function buildCalaDoradaCity(scene, textures) {
     { x: 255, z: -265, w: 36, d: 28, h: 22, t: textures.facadeArtDecoCoral, style: 'villa' },
     { x: 255, z: -395, w: 34, d: 28, h: 24, t: textures.facadeArtDecoTeal, style: 'deco' },
     { x: 90, z: -395, w: 34, d: 28, h: 26, t: textures.facadeArtDecoCream, style: 'villa' },
-    // Extra Downtown Skyline depth (stepped glass towers — shifted clear of Parque Dorado & Precinct HQ)
+    // Extra Downtown Skyline depth (stepped glass towers — shifted clear of Parque Dorado, Precinct HQ & Río Dorado)
     { x: -124, z: -60, w: 30, d: 28, h: 62, t: textures.facadeGlassGold, style: 'tower', spire: true },
-    { x: 120, z: 56, w: 32, d: 28, h: 66, t: textures.facadeGlassTeal, style: 'tower', spire: true },
+    { x: 108, z: 56, w: 30, d: 28, h: 66, t: textures.facadeGlassTeal, style: 'tower', spire: true },
     { x: 214, z: 56, w: 28, d: 28, h: 52, t: textures.facadeGlassGold, style: 'tower' },
     { x: -110, z: -218, w: 28, d: 22, h: 32, t: textures.facadeArtDecoCoral, style: 'deco' },
   ];
@@ -505,7 +521,10 @@ export function buildCalaDoradaCity(scene, textures) {
   }
 
   // 5b. Real Public Urban Facilities (General Hospital, CDPD Precinct HQ, Central Parque Dorado, Bus Stops, Traffic Lights, Hydrants, Curbs, Parking Lots & Coastal Perimeter)
-  buildPublicFacilities(root, collisionWorld, animated, textures, rand);
+  buildPublicFacilities(root, collisionWorld, animated, textures, rand, parkedVehicles);
+
+  // 5c. 3 Enterable Roofed Cover Buildings (Torre Parking Deck, Puerto Cenit Open Warehouse, Barrio Viejo Arcade)
+  buildCoverBuildings(root, collisionWorld, animated, textures);
 
   // 6. Mercado Nocturno: Cobblestone Lantern Night Market Alley with Tight Focused Lighting
   buildMercadoNocturno(root, collisionWorld, animated, textures);
@@ -661,7 +680,7 @@ export function buildCalaDoradaCity(scene, textures) {
   buildActivityWorldSites(root, animated, collisionWorld);
 
   scene.add(root);
-  return { root, colliders, collisionWorld, animated };
+  return { root, colliders, collisionWorld, animated, parkedVehicles };
 }
 
 function buildActivityWorldSites(root, animated, collisionWorld) {
@@ -1116,39 +1135,207 @@ function buildMarinaBoats(root) {
   root.add(g);
 }
 
-function buildPuenteDelSol(root, cx, cz, collisionWorld, animated) {
+function buildRioDorado(root, waterMat, sandMat) {
+  const g = new THREE.Group();
+  const bankMat = new THREE.MeshStandardMaterial({ color: 0x9aa490, roughness: 0.9 });
+  const concMat = new THREE.MeshStandardMaterial({ color: 0x8b939e, roughness: 0.85 });
+
+  // Segmented meandering turquoise river channel + gentle sloped sandy riverbanks from z = -438 to z = 166
+  const stepZ = 14;
+  for (let z = -438; z < 164; z += stepZ) {
+    const zMid = z + stepZ * 0.5;
+    const cx0 = getRiverCenterX(z);
+    const cx1 = getRiverCenterX(z + stepZ);
+    const cx = (cx0 + cx1) * 0.5;
+    const hw = getRiverHalfWidth(zMid);
+    const dx = cx1 - cx0;
+    const segLen = Math.hypot(dx, stepZ) + 2.4;
+    const ang = Math.atan2(dx, stepZ);
+
+    const waterSeg = new THREE.Mesh(new THREE.PlaneGeometry(hw * 2.04, segLen), waterMat);
+    waterSeg.rotation.x = -Math.PI / 2;
+    waterSeg.rotation.z = -ang;
+    waterSeg.position.set(cx, 0.04, zMid);
+    g.add(waterSeg);
+
+    // Gentle sloped sandy/grassy riverbanks on both sides so Dante can swim ashore anywhere
+    for (const side of [-1, 1]) {
+      const bank = new THREE.Mesh(new THREE.PlaneGeometry(5.5, segLen), zMid > 60 ? sandMat : bankMat);
+      bank.rotation.x = -Math.PI / 2;
+      bank.rotation.z = -ang;
+      bank.position.set(cx + side * (hw + 2.1), 0.055, zMid);
+      g.add(bank);
+    }
+  }
+
+  // Dry concrete underpass riverside walkways underneath Puente del Sol (x=40..52 and x=168..180, z=156..238)
+  for (const ex of [46, 174]) {
+    const prom = new THREE.Mesh(new THREE.BoxGeometry(12, 0.24, 82), concMat);
+    prom.position.set(ex, 0.12, 197);
+    prom.receiveShadow = true;
+    g.add(prom);
+  }
+
+  root.add(g);
+}
+
+// Helper to construct a smooth arched elevated bridge deck (Hermite ramp up -> flat elevated span -> ramp down)
+// leaving a genuine hollow passable underpass underneath with overhead ceiling AABB (minY > 4.5m) + separate pier AABBs!
+function addElevatedBridgeDeck(g, bridge, roadTex, steelMat, goldMat, collisionWorld) {
+  const { x1, x2, z, halfZ, deckY, rampLen } = bridge;
+  const widthZ = halfZ * 2;
+  const underMat = new THREE.MeshStandardMaterial({ color: 0x626c7a, roughness: 0.78 });
+  const pierMat = new THREE.MeshStandardMaterial({ color: 0x7b8491, roughness: 0.82 });
+
+  const sampleY = (x) => {
+    const minEdge = Math.min(x - x1, x2 - x);
+    if (minEdge >= rampLen) return deckY;
+    const t = Math.max(0, Math.min(1, minEdge / rampLen));
+    return deckY * (t * t * (3 - 2 * t));
+  };
+
+  // Build smooth segmented bridge girder + properly oriented asphalt road surface with crisp lane markings!
+  const segs = bridge.isMain ? 24 : 14;
+  const stepX = (x2 - x1) / segs;
+  const roadTopMat = new THREE.MeshStandardMaterial({
+    map: roadTex ? roadTex.clone() : null,
+    color: 0xffffff,
+    roughness: 0.68,
+    metalness: 0.1,
+  });
+  if (roadTopMat.map) {
+    roadTopMat.map.needsUpdate = true;
+    roadTopMat.map.repeat.set(1, stepX / 24);
+  }
+  const sidewalkTrimMat = new THREE.MeshStandardMaterial({ color: 0x9aa3b0, roughness: 0.8 });
+
+  for (let i = 0; i < segs; i++) {
+    const ax = x1 + i * stepX;
+    const bx = ax + stepX;
+    const ay = sampleY(ax);
+    const by = sampleY(bx);
+    const midX = (ax + bx) * 0.5;
+    const midY = (ay + by) * 0.5;
+    const segLen = Math.hypot(stepX, by - ay) + 0.14;
+    const slope = Math.atan2(by - ay, stepX);
+
+    // Structural concrete girder beneath roadway
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(segLen, 0.72, widthZ), underMat);
+    slab.position.set(midX, midY - 0.38, z);
+    slab.rotation.z = slope;
+    slab.receiveShadow = true;
+    slab.castShadow = true;
+    g.add(slab);
+
+    // Crisp matching street asphalt plane on top with lane markings running cleanly along X!
+    const roadRibbon = new THREE.Mesh(new THREE.PlaneGeometry(widthZ - 2.4, segLen), roadTopMat);
+    roadRibbon.rotation.x = -Math.PI / 2;
+    roadRibbon.rotation.z = Math.PI / 2;
+    const roadWrap = new THREE.Group();
+    roadWrap.position.set(midX, midY + 0.04, z);
+    roadWrap.rotation.z = slope;
+    roadWrap.add(roadRibbon);
+    g.add(roadWrap);
+
+    for (const side of [-halfZ + 0.45, halfZ - 0.45]) {
+      const curb = new THREE.Mesh(new THREE.BoxGeometry(segLen, 0.24, 1.3), sidewalkTrimMat);
+      curb.position.set(midX, midY + 0.12, z + side * 0.94);
+      curb.rotation.z = slope;
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(segLen, 1.15, 0.65), steelMat);
+      rail.position.set(midX, midY + 0.65, z + side);
+      rail.rotation.z = slope;
+      const topBar = new THREE.Mesh(new THREE.BoxGeometry(segLen, 0.2, 0.78), goldMat);
+      topBar.position.set(midX, midY + 1.32, z + side);
+      topBar.rotation.z = slope;
+      g.add(curb, rail, topBar);
+    }
+  }
+
+  // Register SOLID overhead ceiling AABB (minY > 4.5m) across the flat hollow underpass span!
+  const flatX1 = x1 + rampLen * 0.85;
+  const flatX2 = x2 - rampLen * 0.85;
+  if (collisionWorld && flatX2 > flatX1) {
+    collisionWorld.addBox3D(flatX1, flatX2, deckY - 0.85, deckY + 0.25, z - halfZ, z + halfZ, 'bridge-deck');
+    for (const side of [-halfZ + 0.4, halfZ - 0.4]) {
+      collisionWorld.addBox3D(flatX1, flatX2, deckY - 0.2, deckY + 2.8, z + side - 0.6, z + side + 0.6, 'bridge-rail');
+    }
+  }
+
+  // Support Pier Columns flanking the underpass (separate solid AABBs so vehicles & swimmers weave cleanly between them!)
+  const pierXs = bridge.isMain
+    ? [x1 + 17, x1 + 42, x2 - 42, x2 - 17]
+    : [x1 + 14, x2 - 14];
+  for (const px of pierXs) {
+    const py = sampleY(px);
+    const pierH = Math.max(2.5, py - 0.5);
+    for (const pzOff of [-halfZ + 2.2, halfZ - 2.2]) {
+      const pier = new THREE.Mesh(new THREE.BoxGeometry(2.2, pierH, 2.2), pierMat);
+      pier.position.set(px, pierH * 0.5, z + pzOff);
+      pier.castShadow = true;
+      pier.receiveShadow = true;
+      g.add(pier);
+      if (collisionWorld) {
+        collisionWorld.addRect(px, z + pzOff, 2.3, 2.3, pierH + 0.2, 'bridge-pier', 0);
+      }
+    }
+  }
+}
+
+function buildRiverBridges(root, collisionWorld, animated, textures) {
+  const g = new THREE.Group();
+  const steelMat = new THREE.MeshStandardMaterial({ color: 0x3c4d63, roughness: 0.42, metalness: 0.55 });
+  const goldTrim = new THREE.MeshStandardMaterial({ color: 0xffc84d, roughness: 0.3, metalness: 0.72 });
+  const lampGlowTex = getRadialGlowTexture('rgba(255,244,205,0.85)', 'rgba(255,176,72,0.28)', 'rgba(0,0,0,0)');
+
+  for (const bridge of RIVER_BRIDGES) {
+    if (bridge.isMain) continue;
+    addElevatedBridgeDeck(g, bridge, textures?.road, steelMat, goldTrim, collisionWorld);
+
+    // Decorative arched steel truss ribs & bridge lamps on Midtown/Central/North bridges
+    const midX = (bridge.x1 + bridge.x2) * 0.5;
+    for (const side of [-bridge.halfZ + 0.5, bridge.halfZ - 0.5]) {
+      const arch = new THREE.Mesh(
+        new THREE.TorusGeometry((bridge.x2 - bridge.x1) * 0.28, 0.35, 8, 20, Math.PI),
+        steelMat
+      );
+      arch.position.set(midX, bridge.deckY + 0.4, bridge.z + side);
+      g.add(arch);
+
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.14, 4.6, 6), steelMat);
+      post.position.set(midX, bridge.deckY + 2.5, bridge.z + side);
+      const orb = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: lampGlowTex, transparent: true, opacity: 0.82, blending: THREE.AdditiveBlending, depthWrite: false,
+      }));
+      orb.scale.set(1.7, 1.7, 1);
+      orb.position.set(midX, bridge.deckY + 4.9, bridge.z + side);
+      g.add(post, orb);
+    }
+  }
+  root.add(g);
+}
+
+function buildPuenteDelSol(root, cx, cz, collisionWorld, animated, textures) {
   const g = new THREE.Group();
   const redSteel = new THREE.MeshStandardMaterial({ color: 0xdf3b30, roughness: 0.34, metalness: 0.48 });
   const goldTrim = new THREE.MeshStandardMaterial({ color: 0xffc84d, roughness: 0.28, metalness: 0.72 });
-  const deckMat = new THREE.MeshStandardMaterial({ color: 0x262c38, roughness: 0.68 });
   const lampGlowTex = getRadialGlowTexture('rgba(255,244,205,0.85)', 'rgba(255,176,72,0.28)', 'rgba(0,0,0,0)');
   const bridgePoolTex = getRadialGlowTexture('rgba(255,214,132,0.38)', 'rgba(255,164,68,0.12)', 'rgba(0,0,0,0)');
   const redBeaconTex = getRadialGlowTexture('#ffffff', 'rgba(255,48,78,0.86)', 'rgba(0,0,0,0)');
 
-  const deck = new THREE.Mesh(new THREE.BoxGeometry(142, 0.8, 23.5), deckMat);
-  deck.position.set(cx, 0.32, cz);
-  g.add(deck);
+  const mainBridge = RIVER_BRIDGES[0];
+  addElevatedBridgeDeck(g, mainBridge, textures?.road, redSteel, goldTrim, collisionWorld);
 
+  const deckY = mainBridge.deckY;
   for (const side of [-11.5, 11.5]) {
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(142, 1.25, 0.72), redSteel);
-    rail.position.set(cx, 1.15, cz + side);
-    const topBar = new THREE.Mesh(new THREE.BoxGeometry(142, 0.22, 0.85), goldTrim);
-    topBar.position.set(cx, 1.85, cz + side);
-    g.add(rail, topBar);
-
-    if (collisionWorld) {
-      collisionWorld.addRect(cx, cz + side, 142, 1.2, 4.0, 'bridge-rail');
-    }
-
-    for (let lx = cx - 56; lx <= cx + 56; lx += 28) {
+    for (let lx = cx - 48; lx <= cx + 48; lx += 24) {
       const post = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 6.2, 6), redSteel);
-      post.position.set(lx, 4.2, cz + side * 0.96);
+      post.position.set(lx, deckY + 3.4, cz + side * 0.96);
       const orbMat = new THREE.SpriteMaterial({
         map: lampGlowTex, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false,
       });
       const orb = new THREE.Sprite(orbMat);
       orb.scale.set(1.9, 1.9, 1);
-      orb.position.set(lx, 7.4, cz + side * 0.92);
+      orb.position.set(lx, deckY + 6.6, cz + side * 0.92);
       g.add(post, orb);
       if (animated) {
         const poolMat = new THREE.MeshBasicMaterial({
@@ -1156,9 +1343,9 @@ function buildPuenteDelSol(root, cx, cz, collisionWorld, animated) {
         });
         const pool = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), poolMat);
         pool.rotation.x = -Math.PI / 2;
-        pool.position.set(lx, 0.76, cz + side * 0.6);
+        pool.position.set(lx, deckY + 0.15, cz + side * 0.6);
         g.add(pool);
-        animated.streetLampPositions.push(new THREE.Vector3(lx, 7.2, cz + side * 0.8));
+        animated.streetLampPositions.push(new THREE.Vector3(lx, deckY + 6.5, cz + side * 0.8));
         animated.nightGlowMeshes.push({ mat: poolMat, dayOp: 0.0, nightOp: 0.72 });
       }
     }
@@ -1167,25 +1354,25 @@ function buildPuenteDelSol(root, cx, cz, collisionWorld, animated) {
   // Twin Iconic Red & Gold Suspension Pylons
   for (const px of [cx - 34, cx + 34]) {
     for (const side of [-11.6, 11.6]) {
-      const towerLower = new THREE.Mesh(new THREE.BoxGeometry(3.6, 26, 3.6), redSteel);
-      towerLower.position.set(px, 13, cz + side);
+      const towerLower = new THREE.Mesh(new THREE.BoxGeometry(3.6, 30, 3.6), redSteel);
+      towerLower.position.set(px, 15, cz + side);
       towerLower.castShadow = true;
       const towerUpper = new THREE.Mesh(new THREE.BoxGeometry(2.7, 23, 2.7), redSteel);
-      towerUpper.position.set(px, 37.5, cz + side);
+      towerUpper.position.set(px, 41.5, cz + side);
       towerUpper.castShadow = true;
       const cap = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.2, 3.2), goldTrim);
-      cap.position.set(px, 49.4, cz + side);
+      cap.position.set(px, 53.4, cz + side);
       const beacon = new THREE.Sprite(new THREE.SpriteMaterial({
         map: redBeaconTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
       }));
       beacon.scale.set(2.8, 2.8, 1);
-      beacon.position.set(px, 50.8, cz + side);
+      beacon.position.set(px, 54.8, cz + side);
       g.add(towerLower, towerUpper, cap, beacon);
       if (collisionWorld) {
-        collisionWorld.addRect(px, cz + side, 3.8, 3.8, 50, 'bridge-tower');
+        collisionWorld.addRect(px, cz + side, 3.8, 3.8, 54, 'bridge-tower', 0);
       }
     }
-    for (const cy of [18, 32, 44.5]) {
+    for (const cy of [22, 36, 48.5]) {
       const beam = new THREE.Mesh(new THREE.BoxGeometry(2.3, 2.3, 24.4), goldTrim);
       beam.position.set(px, cy, cz);
       const rib = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.55, 24.6), redSteel);
@@ -1196,10 +1383,10 @@ function buildPuenteDelSol(root, cx, cz, collisionWorld, animated) {
     for (const side of [-11.3, 11.3]) {
       for (const offset of [-30, -22, -14, -7, 7, 14, 22, 30]) {
         const dx = offset;
-        const dy = -42;
+        const dy = -(49 - deckY);
         const len = Math.hypot(dx, dy);
         const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, len, 5), cableMat);
-        cable.position.set(px + dx * 0.5, 45 + dy * 0.5, cz + side);
+        cable.position.set(px + dx * 0.5, 49 + dy * 0.5, cz + side);
         cable.rotation.z = Math.atan2(dx, -dy);
         g.add(cable);
       }
@@ -1518,7 +1705,28 @@ function createPalmTree(rand, scale = 1.0) {
 
 // Real Public Urban Facilities: Cala Dorada General Hospital, CDPD Precinct HQ, Central Parque Dorado,
 // Covered Bus Stops, Intersection Traffic Lights, Fire Hydrants, Public Parking Lots, Curbs & Natural Coastal Perimeter.
-function buildPublicFacilities(root, collisionWorld, animated, textures, rand) {
+function buildPublicFacilities(root, collisionWorld, animated, textures, rand, parkedVehicles = []) {
+  const registerParked = (mesh, typeKey) => {
+    const spec = VEHICLES[typeKey] ?? VEHICLES.cabo_gt;
+    parkedVehicles.push({
+      mesh,
+      typeKey,
+      spec,
+      pos: mesh.position,
+      yaw: mesh.rotation.y,
+      vel: new THREE.Vector3(),
+      speed: 0,
+      hp: spec.maxHp,
+      maxHp: spec.maxHp,
+      condition: 100,
+      burning: false,
+      fireCountdown: 0,
+      exploded: false,
+      smokeTimer: 0,
+      crackleTimer: 0,
+      isParked: true,
+    });
+  };
   const g = new THREE.Group();
   const stoneMat = new THREE.MeshStandardMaterial({ color: 0xeae4d8, roughness: 0.56 });
   const hospitalWhite = new THREE.MeshStandardMaterial({ color: 0xf0f4f8, roughness: 0.42, metalness: 0.1 });
@@ -1583,6 +1791,7 @@ function buildPublicFacilities(root, collisionWorld, animated, textures, rand) {
     const amb = createVehicleMesh('cdpd_enforcer', 0xf6f8fc);
     amb.position.set(h.x - 12, 0, h.z + 21);
     amb.rotation.y = Math.PI / 2;
+    registerParked(amb, 'cdpd_enforcer');
     hg.add(mainBody, wingUpper, band1, band2, winRibbon, canopy, crossV, crossH, sign, bayPool, amb);
     g.add(hg);
     collisionWorld.addRect(h.x, h.z, 43, 29, 36, 'hospital');
@@ -1636,9 +1845,11 @@ function buildPublicFacilities(root, collisionWorld, animated, textures, rand) {
     const cr1 = createVehicleMesh('cdpd_interceptor');
     cr1.position.set(p.x - 9, 0, p.z + 22.5);
     cr1.rotation.y = 0;
+    registerParked(cr1, 'cdpd_interceptor');
     const cr2 = createVehicleMesh('cdpd_interceptor');
     cr2.position.set(p.x - 3, 0, p.z + 22.5);
     cr2.rotation.y = 0;
+    registerParked(cr2, 'cdpd_interceptor');
     pg.add(body, upper, trim, win, sign, pdPool, lot, cr1, cr2);
     g.add(pg);
     collisionWorld.addRect(p.x, p.z, 41, 29, 32, 'police-hq');
@@ -1762,10 +1973,9 @@ function buildPublicFacilities(root, collisionWorld, animated, textures, rand) {
     }
   }
 
-  // 4. PUBLIC PARKING LOTS (beside Parque Dorado & Paseo Plaza)
+  // 4. PUBLIC PARKING LOT (Paseo Plaza — note (18,58) is now the Enterable Torre Covered Parking Deck!)
   const parkingLots = [
     { x: -158, z: 158, w: 30, d: 22 },
-    { x: 18, z: 58, w: 24, d: 30 },
   ];
   for (const pl of parkingLots) {
     const pad = new THREE.Mesh(new THREE.PlaneGeometry(pl.w, pl.d), asphaltLotMat);
@@ -1778,9 +1988,10 @@ function buildPublicFacilities(root, collisionWorld, animated, textures, rand) {
       l.position.set(pl.x + sx, 0.12, pl.z);
       g.add(l);
     }
-    const parked = createVehicleMesh(pl.x < 0 ? 'convertible' : 'cabo_gt', pl.x < 0 ? 0xffbe55 : 0x4ba3ff);
+    const parked = createVehicleMesh('convertible', 0xffbe55);
     parked.position.set(pl.x - 3, 0, pl.z);
     g.add(parked);
+    registerParked(parked, 'convertible');
   }
 
   // 5. COVERED BUS STOPS along Major Boulevards
@@ -1896,11 +2107,174 @@ function buildPublicFacilities(root, collisionWorld, animated, textures, rand) {
   g.add(eastWall);
   collisionWorld.addRect(468, -88, 6.0, 730, 16, 'seawall');
 
-  // Marina Bay Channel Stone Seawall Embankments (framing the bay water under Puente del Sol cleanly)
-  const bayNorthWall = new THREE.Mesh(new THREE.BoxGeometry(142, 1.4, 2.2), seawallMat);
-  bayNorthWall.position.set(110, 0.7, 155);
+  // Marina Bay Channel Stone Seawall Embankment (leaves wide navigable mouth at x=126..170 for Río Dorado!)
+  const bayNorthWall = new THREE.Mesh(new THREE.BoxGeometry(84, 1.4, 2.2), seawallMat);
+  bayNorthWall.position.set(82, 0.7, 155);
   g.add(bayNorthWall);
-  collisionWorld.addRect(110, 155, 142, 2.6, 2.5, 'seawall');
+  collisionWorld.addRect(82, 155, 84, 2.6, 2.5, 'seawall');
+
+  root.add(g);
+}
+
+// 3 Enterable Roofed Cover Buildings with wide open entrances, separate perimeter walls, interior cover & solid overhead roof slabs!
+function buildCoverBuildings(root, collisionWorld, animated, textures) {
+  const g = new THREE.Group();
+  const concMat = new THREE.MeshStandardMaterial({ color: 0x828c99, roughness: 0.84 });
+  const darkAsphalt = new THREE.MeshStandardMaterial({ color: 0x242a34, roughness: 0.78 });
+  const steelMat = new THREE.MeshStandardMaterial({ color: 0x455468, roughness: 0.52, metalness: 0.55 });
+  const stuccoMat = new THREE.MeshStandardMaterial({ color: 0xe5ceb0, roughness: 0.78 });
+  const terraMat = new THREE.MeshStandardMaterial({ color: 0xb85032, roughness: 0.72 });
+  const crateMat = new THREE.MeshStandardMaterial({ color: 0x996a40, roughness: 0.82 });
+  const stripMat = new THREE.MeshBasicMaterial({ color: 0xfff0c8 });
+
+  // 1. TORRE COVERED PARKING DECK (Distrito Torre: x=18, z=58, w=26, d=30, roofY=5.4) — drive or run right inside!
+  {
+    const b = COVER_BUILDINGS[0];
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(b.w, b.d), darkAsphalt);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(b.x, 0.12, b.z);
+    g.add(floor);
+
+    // Solid East & West perimeter walls + flanking North/South facade walls leaving a wide 12m drive-through opening!
+    for (const sx of [-b.w / 2 + 0.6, b.w / 2 - 0.6]) {
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(1.2, b.roofY, b.d), concMat);
+      wall.position.set(b.x + sx, b.roofY / 2, b.z);
+      wall.castShadow = true;
+      wall.receiveShadow = true;
+      g.add(wall);
+      collisionWorld.addRect(b.x + sx, b.z, 1.4, b.d, b.roofY + 0.5, 'cover-wall', 0);
+    }
+    for (const sz of [-b.d / 2 + 0.6, b.d / 2 - 0.6]) {
+      for (const sx of [-b.w / 2 + 3.5, b.w / 2 - 3.5]) {
+        const flank = new THREE.Mesh(new THREE.BoxGeometry(7.0, b.roofY, 1.2), concMat);
+        flank.position.set(b.x + sx, b.roofY / 2, b.z + sz);
+        flank.castShadow = true;
+        g.add(flank);
+        collisionWorld.addRect(b.x + sx, b.z + sz, 7.2, 1.4, b.roofY + 0.5, 'cover-wall', 0);
+      }
+    }
+
+    // 4 Interior Concrete Columns (drive cleanly down the central 11m lane or hide behind pillars!)
+    for (const px of [-6.2, 6.2]) {
+      for (const pz of [-8.0, 8.0]) {
+        const col = new THREE.Mesh(new THREE.BoxGeometry(1.1, b.roofY, 1.1), concMat);
+        col.position.set(b.x + px, b.roofY / 2, b.z + pz);
+        g.add(col);
+        collisionWorld.addRect(b.x + px, b.z + pz, 1.2, 1.2, b.roofY, 'pillar', 0);
+      }
+    }
+
+    // Solid Overhead Roof Slab (minY=5.0, maxY=6.4 — blocks HALCÓN-1 helicopter LOS & spotlight!)
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(b.w + 0.8, 1.1, b.d + 0.8), concMat);
+    roof.position.set(b.x, b.roofY + 0.45, b.z);
+    roof.castShadow = true;
+    roof.receiveShadow = true;
+    g.add(roof);
+    collisionWorld.addBox3D(b.x - b.w / 2 - 0.5, b.x + b.w / 2 + 0.5, b.roofY - 0.4, b.roofY + 1.2, b.z - b.d / 2 - 0.5, b.z + b.d / 2 + 0.5, 'roof');
+
+    // Interior ceiling fluorescent strips & exterior marquee sign
+    for (const lz of [-8, 0, 8]) {
+      const lightBar = new THREE.Mesh(new THREE.BoxGeometry(10, 0.14, 0.36), stripMat);
+      lightBar.position.set(b.x, b.roofY - 0.12, b.z + lz);
+      g.add(lightBar);
+    }
+    const sign = new THREE.Mesh(
+      new THREE.BoxGeometry(14, 2.2, 0.5),
+      new THREE.MeshBasicMaterial({ map: createSignTexture('TORRE PARKING', '#101828', '#ffbe55', '#34e0c8') })
+    );
+    sign.position.set(b.x, b.roofY + 1.4, b.z + b.d / 2 + 0.3);
+    g.add(sign);
+  }
+
+  // 2. PUERTO CENIT OPEN WAREHOUSE (Puerto Cenit: x=308, z=-112, w=30, d=24, roofY=6.0)
+  {
+    const b = COVER_BUILDINGS[1];
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(b.w, b.d), darkAsphalt);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(b.x, 0.12, b.z);
+    g.add(floor);
+
+    // Solid North wall & Solid East wall
+    const nWall = new THREE.Mesh(new THREE.BoxGeometry(b.w, b.roofY, 1.2), steelMat);
+    nWall.position.set(b.x, b.roofY / 2, b.z - b.d / 2 + 0.6);
+    const eWall = new THREE.Mesh(new THREE.BoxGeometry(1.2, b.roofY, b.d), steelMat);
+    eWall.position.set(b.x + b.w / 2 - 0.6, b.roofY / 2, b.z);
+    g.add(nWall, eWall);
+    collisionWorld.addRect(b.x, b.z - b.d / 2 + 0.6, b.w, 1.4, b.roofY + 0.5, 'cover-wall', 0);
+    collisionWorld.addRect(b.x + b.w / 2 - 0.6, b.z, 1.4, b.d, b.roofY + 0.5, 'cover-wall', 0);
+
+    // Partial South & West flanking walls leaving 14m wide open cargo bay doorways
+    const sFlank = new THREE.Mesh(new THREE.BoxGeometry(10, b.roofY, 1.2), steelMat);
+    sFlank.position.set(b.x + 10, b.roofY / 2, b.z + b.d / 2 - 0.6);
+    const wFlank = new THREE.Mesh(new THREE.BoxGeometry(1.2, b.roofY, 8), steelMat);
+    wFlank.position.set(b.x - b.w / 2 + 0.6, b.roofY / 2, b.z - 8);
+    g.add(sFlank, wFlank);
+    collisionWorld.addRect(b.x + 10, b.z + b.d / 2 - 0.6, 10, 1.4, b.roofY + 0.5, 'cover-wall', 0);
+    collisionWorld.addRect(b.x - b.w / 2 + 0.6, b.z - 8, 1.4, 8, b.roofY + 0.5, 'cover-wall', 0);
+
+    // Interior cargo crates for tactical bullet cover
+    for (const [cx, cz] of [[5, -3], [6, 3], [-4, -5]]) {
+      const crate = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.8, 2.2), crateMat);
+      crate.position.set(b.x + cx, 0.9, b.z + cz);
+      crate.castShadow = true;
+      g.add(crate);
+      collisionWorld.addRect(b.x + cx, b.z + cz, 3.3, 2.3, 1.85, 'prop', 0);
+    }
+
+    // Solid Overhead Corrugated Roof Slab
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(b.w + 1.0, 1.1, b.d + 1.0), steelMat);
+    roof.position.set(b.x, b.roofY + 0.5, b.z);
+    roof.castShadow = true;
+    g.add(roof);
+    collisionWorld.addBox3D(b.x - b.w / 2 - 0.5, b.x + b.w / 2 + 0.5, b.roofY - 0.4, b.roofY + 1.2, b.z - b.d / 2 - 0.5, b.z + b.d / 2 + 0.5, 'roof');
+
+    const sign = new THREE.Mesh(
+      new THREE.BoxGeometry(15, 2.4, 0.5),
+      new THREE.MeshBasicMaterial({ map: createSignTexture('CENIT CARGO BAY', '#141224', '#d4b8ff', '#a876ff') })
+    );
+    sign.position.set(b.x - 4, b.roofY + 1.6, b.z + b.d / 2 + 0.35);
+    g.add(sign);
+  }
+
+  // 3. BARRIO VIEJO COURTYARD ARCADE / COVERED SHELTER (x=204, z=-212, w=22, d=18, roofY=5.2)
+  {
+    const b = COVER_BUILDINGS[2];
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(b.w, b.d), stuccoMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(b.x, 0.12, b.z);
+    g.add(floor);
+
+    // Solid North & East stucco walls; wide open arched colonnade on South & West!
+    const nWall = new THREE.Mesh(new THREE.BoxGeometry(b.w, b.roofY, 1.1), stuccoMat);
+    nWall.position.set(b.x, b.roofY / 2, b.z - b.d / 2 + 0.55);
+    const eWall = new THREE.Mesh(new THREE.BoxGeometry(1.1, b.roofY, b.d), stuccoMat);
+    eWall.position.set(b.x + b.w / 2 - 0.55, b.roofY / 2, b.z);
+    g.add(nWall, eWall);
+    collisionWorld.addRect(b.x, b.z - b.d / 2 + 0.55, b.w, 1.3, b.roofY + 0.5, 'cover-wall', 0);
+    collisionWorld.addRect(b.x + b.w / 2 - 0.55, b.z, 1.3, b.d, b.roofY + 0.5, 'cover-wall', 0);
+
+    // Colonnade corner & front stone arches
+    for (const [px, pz] of [[-b.w / 2 + 0.7, b.d / 2 - 0.7], [0, b.d / 2 - 0.7], [b.w / 2 - 0.7, b.d / 2 - 0.7], [-b.w / 2 + 0.7, 0]]) {
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.52, b.roofY, 10), stuccoMat);
+      col.position.set(b.x + px, b.roofY / 2, b.z + pz);
+      g.add(col);
+      collisionWorld.addRect(b.x + px, b.z + pz, 1.0, 1.0, b.roofY, 'pillar', 0);
+    }
+
+    // Solid Terracotta Overhead Roof Slab
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(b.w + 1.4, 1.1, b.d + 1.4), terraMat);
+    roof.position.set(b.x, b.roofY + 0.5, b.z);
+    roof.castShadow = true;
+    g.add(roof);
+    collisionWorld.addBox3D(b.x - b.w / 2 - 0.7, b.x + b.w / 2 + 0.7, b.roofY - 0.4, b.roofY + 1.3, b.z - b.d / 2 - 0.7, b.z + b.d / 2 + 0.7, 'roof');
+
+    const sign = new THREE.Mesh(
+      new THREE.BoxGeometry(12, 2.0, 0.45),
+      new THREE.MeshBasicMaterial({ map: createSignTexture('PLAZA ARCADE', '#201412', '#ffd46e', '#ff7846') })
+    );
+    sign.position.set(b.x, b.roofY + 1.45, b.z + b.d / 2 + 0.4);
+    g.add(sign);
+  }
 
   root.add(g);
 }

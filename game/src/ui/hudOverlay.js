@@ -60,6 +60,7 @@ export class HudOverlay {
     this.root = document.getElementById('hud-root');
     this.combatLayer = document.getElementById('combat-world-layer');
     this.damageFlashEl = document.getElementById('damage-flash');
+    this.underwaterTintEl = document.getElementById('underwater-tint');
     this.statusOverlayEl = document.getElementById('status-overlay');
     this.reticle = document.getElementById('reticle');
     this.reloadSvg = document.getElementById('reticle-reload-svg');
@@ -92,10 +93,11 @@ export class HudOverlay {
       if (this.wheelEl) this.wheelEl.classList.add('hidden');
       if (this.statusOverlayEl) this.statusOverlayEl.classList.add('hidden');
       if (this.damageFlashEl) this.damageFlashEl.classList.add('hidden');
+      if (this.underwaterTintEl) this.underwaterTintEl.classList.add('hidden');
     }
   }
 
-  // CS:GO-style 6-wedge circular radial weapon selector (∞ symbol for melee)
+  // CS:GO-style 6-wedge circular radial weapon selector (updates hover state in-place so clicks NEVER drop or fire bullets!)
   renderWeaponWheel(state, shotRight = false) {
     if (!this.wheelEl) return;
     if (state.mode !== 'playing' || !state.weaponWheelOpen || state.statusOverlay) {
@@ -111,9 +113,25 @@ export class HudOverlay {
     const activeW = WEAPONS[selIdx] ?? WEAPONS[0];
     const activeAmmo = state.weaponAmmo[activeW.id];
     const ammoSummary = activeW.melee ? '∞' : `${activeAmmo.clip} / ${activeAmmo.reserve}`;
-    const sig = `${selIdx}|${state.activeWeaponIdx}|${ammoSummary}|${shotRight}`;
-    if (sig === this.lastWheelSignature && this.wheelEl.innerHTML.length > 0) return;
-    this.lastWheelSignature = sig;
+    const ammoSig = WEAPONS.map((w) => w.melee ? 'i' : `${state.weaponAmmo[w.id].clip}/${state.weaponAmmo[w.id].reserve}`).join('|');
+    const structSig = `${ammoSig}|${shotRight}`;
+
+    // Fast in-place update if wheel SVG is already built (prevents DOM teardown between mousedown and click!)
+    if (structSig === this.lastWheelSignature && this.wheelEl.querySelector('svg')) {
+      this.wheelEl.querySelectorAll('.wheel-wedge').forEach((g) => {
+        const idx = Number(g.dataset.widx);
+        const isSel = idx === selIdx;
+        g.classList.toggle('selected', isSel);
+        const iconG = g.querySelector('.wedge-icon-g');
+        if (iconG) iconG.setAttribute('fill', isSel ? '#fff6db' : '#d5dff2');
+      });
+      const hubName = this.wheelEl.querySelector('.wheel-hub-name');
+      const hubAmmo = this.wheelEl.querySelector('.wheel-hub-ammo');
+      if (hubName) hubName.textContent = activeW.name.toUpperCase();
+      if (hubAmmo) hubAmmo.textContent = ammoSummary;
+      return;
+    }
+    this.lastWheelSignature = structSig;
 
     const cx = 134;
     const cy = 134;
@@ -140,7 +158,7 @@ export class HudOverlay {
       return `<g class="wheel-wedge ${selected ? 'selected' : ''}" data-widx="${idx}">
         <path class="wedge-bg" d="${pathD}" />
         <text class="wedge-key" x="${kx.toFixed(1)}" y="${(ky + 3.5).toFixed(1)}" text-anchor="middle">${w.slot}</text>
-        <g transform="translate(${(ix - 17).toFixed(1)}, ${(iy - 10).toFixed(1)}) scale(0.71)" fill="${selected ? '#fff6db' : '#d5dff2'}">
+        <g class="wedge-icon-g" transform="translate(${(ix - 17).toFixed(1)}, ${(iy - 10).toFixed(1)}) scale(0.71)" fill="${selected ? '#fff6db' : '#d5dff2'}">
           ${iconInner}
         </g>
         ${w.melee
@@ -168,12 +186,18 @@ export class HudOverlay {
       g.addEventListener('mouseenter', () => {
         const idx = Number(g.dataset.widx);
         state.weaponWheelHoverIdx = idx;
+        if (this.cb.onHoverWeapon) this.cb.onHoverWeapon(idx);
         this.renderWeaponWheel(state, shotRight);
+      });
+      g.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const idx = Number(g.dataset.widx);
+        if (this.cb.onSelectWeapon) this.cb.onSelectWeapon(idx);
       });
       g.addEventListener('click', (e) => {
         e.stopPropagation();
-        const idx = Number(g.dataset.widx);
-        if (this.cb.onSelectWeapon) this.cb.onSelectWeapon(idx);
+        e.preventDefault();
       });
     });
   }
@@ -269,11 +293,14 @@ export class HudOverlay {
       }
     }
 
-    // Red Screen-Edge Damage Flash
+    // Red Screen-Edge Damage Flash & Blue-Teal Underwater Tint
     if (this.damageFlashEl) {
       const df = state.damageFlash ?? 0;
       this.damageFlashEl.classList.toggle('hidden', df <= 0.02);
       if (df > 0.02) this.damageFlashEl.style.opacity = String(Math.min(1, df).toFixed(2));
+    }
+    if (this.underwaterTintEl) {
+      this.underwaterTintEl.classList.toggle('hidden', !state.diving || Boolean(state.statusOverlay));
     }
 
     this.reticle.classList.toggle(
@@ -369,13 +396,15 @@ export class HudOverlay {
     // 2. Top-Right Cash (Pure classic GTA green money)
     this.statusEl.innerHTML = `<div class="cash-display">$${Math.round(state.cash).toLocaleString()}</div>`;
 
-    // 3. Plain 5 Wanted Stars ONLY — ZERO text beside or under stars!
+    // 3. Plain 5 Wanted Stars ONLY — ZERO text beside or under stars! Flashing when hidden & cooling down!
     const flashRed = Math.sin(elapsed * 10) > 0;
+    const hiddenDim = Boolean(state.hiddenFromPolice && state.wantedLevel > 0 && Math.sin(elapsed * 7.5) < 0);
     const starsHtml = [1, 2, 3, 4, 5].map((n) => {
       const lit = n <= state.wantedLevel;
       let cls = '';
       if (lit) {
-        if (state.wantedLevel >= 4) cls = flashRed ? 'flash-red' : 'flash-blue';
+        if (hiddenDim) cls = 'lit hidden-dim';
+        else if (state.wantedLevel >= 4) cls = flashRed ? 'flash-red' : 'flash-blue';
         else cls = 'lit';
       }
       return `<span class="w-star ${cls}">★</span>`;
@@ -417,19 +446,28 @@ export class HudOverlay {
       this.crewEl.classList.add('hidden');
     }
 
-    // 6. Pure GTA Bottom-Left Vitals: Health (green) + Armor (blue) + slim Stamina bar (cyan/amber when exhausted)
+    // 6. Pure GTA Bottom-Left Vitals: Health (green) + Armor (blue) + slim Stamina bar + Oxygen bar (ONLY while underwater!)
     const hpPct = Math.max(0, Math.min(100, Math.round(state.health)));
     const arPct = Math.max(0, Math.min(100, Math.round(state.armor)));
     const stPct = Math.max(0, Math.min(100, Math.round(state.stamina ?? 100)));
+    const oxPct = Math.max(0, Math.min(100, Math.round(state.oxygen ?? 100)));
     const stamCol = state.exhausted
       ? (Math.sin(elapsed * 14) > 0 ? '#ff6b4a' : '#ffbe55')
       : 'linear-gradient(90deg,#f59e0b,#ffd24d)';
+    const showOxygen = Boolean(state.diving || oxPct < 99);
+    const oxyCol = oxPct < 25 && Math.sin(elapsed * 14) > 0
+      ? '#ff3b5c'
+      : 'linear-gradient(90deg,#0ea5e9,#38bdf8)';
+    const oxyHtml = showOxygen
+      ? `<div class="bar-track slim" id="oxygen-bar"><div class="bar-fill" style="width:${oxPct}%;background:${oxyCol}"></div></div>`
+      : '';
     this.vitalsEl.innerHTML = `
       <div class="vital-split">
         <div class="bar-track"><div class="bar-fill" style="width:${hpPct}%;background:linear-gradient(90deg,#22c55e,#4ade80)"></div></div>
         <div class="bar-track"><div class="bar-fill" style="width:${arPct}%;background:linear-gradient(90deg,#3b82f6,#60a5fa)"></div></div>
       </div>
-      <div class="bar-track slim"><div class="bar-fill" style="width:${stPct}%;background:${stamCol}"></div></div>`;
+      <div class="bar-track slim"><div class="bar-fill" style="width:${stPct}%;background:${stamCol}"></div></div>
+      ${oxyHtml}`;
 
     // 7. Portrait Dialogue Box (shown during story beats)
     if (state.dialogue) {

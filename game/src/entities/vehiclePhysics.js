@@ -32,6 +32,7 @@ export class VehiclePhysics {
       grounded: true,
       hp: spec.maxHp,
       maxHp: spec.maxHp,
+      condition: 100,
       nitro: 100,
       boosting: false,
       drifting: false,
@@ -48,6 +49,7 @@ export class VehiclePhysics {
 
   repairVehicle(v, paintHex = null) {
     v.hp = v.maxHp;
+    v.condition = 100;
     v.nitro = 100;
     v.burning = false;
     v.fireCountdown = 0;
@@ -65,6 +67,7 @@ export class VehiclePhysics {
   applyDamage(v, amount, callbacks = {}) {
     if (!v || v.exploded) return;
     v.hp = Math.max(0, v.hp - amount);
+    v.condition = Math.round((v.hp / Math.max(1, v.maxHp)) * 100);
     if (v.hp <= 0 && !v.burning) {
       v.burning = true;
       v.fireCountdown = 5.0; // Humane 5.0-second bail-out countdown before detonation!
@@ -253,8 +256,8 @@ export class VehiclePhysics {
       vFwd *= Math.pow(0.54, dt);
     }
 
-    // Natural water depth drag & gentle shore buoyancy (ZERO artificial invisible walls!)
-    const waterDepth = this.collisionWorld ? this.collisionWorld.getWaterDepth(v.pos.x, v.pos.z) : 0;
+    // Natural water depth drag (respecting elevated bridge deck height!)
+    const waterDepth = this.collisionWorld ? this.collisionWorld.getWaterDepth(v.pos.x, v.pos.z, v.pos.y) : 0;
     v.inWater = waterDepth > 0.05;
     if (waterDepth > 0.05) {
       vFwd *= Math.pow(waterDepth > 0.9 ? 0.12 : 0.38, dt);
@@ -312,22 +315,32 @@ export class VehiclePhysics {
 
     v.speed = Math.hypot(v.vel.x, v.vel.z);
 
-    // Vertical gravity
-    if (!v.grounded) {
+    // Vertical elevation: smoothly ride up & over elevated bridges, OR drive underneath along embankments!
+    const surfaceY = this.collisionWorld ? this.collisionWorld.getSurfaceY(v.pos.x, v.pos.z, v.pos.y) : 0;
+    if (v.grounded) {
+      v.pos.y = THREE.MathUtils.lerp(v.pos.y, surfaceY, Math.min(1, dt * 16));
+      if (Math.abs(v.pos.y - surfaceY) < 0.06) v.pos.y = surfaceY;
+    } else {
       v.vy -= WORLD.gravity * dt;
       v.pos.y += v.vy * dt;
-      if (v.pos.y <= 0) {
-        v.pos.y = 0;
+      if (v.pos.y <= surfaceY) {
+        v.pos.y = surfaceY;
         v.vy = 0;
         v.grounded = true;
       }
     }
 
-    // Apply transform & responsive suspension pitch/roll + wheel spin
+    // Apply transform & responsive suspension pitch/roll + bridge ramp pitch + wheel spin
     v.mesh.position.copy(v.pos);
     v.mesh.rotation.y = v.yaw;
+    let rampPitch = 0;
+    if (this.collisionWorld && surfaceY > 0.05) {
+      const aheadY = this.collisionWorld.getSurfaceY(v.pos.x + nFwdX * 2.2, v.pos.z + nFwdZ * 2.2, v.pos.y);
+      const behindY = this.collisionWorld.getSurfaceY(v.pos.x - nFwdX * 2.2, v.pos.z - nFwdZ * 2.2, v.pos.y);
+      rampPitch = -Math.atan2(aheadY - behindY, 4.4);
+    }
     const targetRoll = right * Math.min(0.085, v.speed * 0.0022) * (handbrake ? 1.3 : 1.0);
-    const targetPitch = boost ? -0.042 : -forward * 0.025;
+    const targetPitch = rampPitch + (boost ? -0.042 : -forward * 0.025);
     v.mesh.rotation.z = THREE.MathUtils.lerp(v.mesh.rotation.z, targetRoll, Math.min(1, dt * 8));
     v.mesh.rotation.x = THREE.MathUtils.lerp(v.mesh.rotation.x, targetPitch, Math.min(1, dt * 8));
 

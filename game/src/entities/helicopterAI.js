@@ -56,13 +56,14 @@ function createHeliSideLiveryTexture() {
 }
 
 export class HelicopterAI {
-  constructor(scene) {
+  constructor(scene, collisionWorld = null) {
     this.scene = scene;
+    this.collisionWorld = collisionWorld;
     this.mesh = this._buildHeliMesh();
     this.mesh.visible = false;
     this.scene.add(this.mesh);
 
-    // Focused ground spotlight pool ring beneath target (tighter radius)
+    // Focused ground spotlight pool ring beneath target (stops on roof/bridge deck when player hides underneath!)
     this.groundPool = new THREE.Mesh(
       new THREE.PlaneGeometry(10.5, 10.5),
       new THREE.MeshBasicMaterial({
@@ -82,7 +83,10 @@ export class HelicopterAI {
     this.yaw = 0;
     this.bankRoll = 0;
     this.spotTargetPos = new THREE.Vector3();
+    this.lastSeenPos = new THREE.Vector3();
     this.spotInitialized = false;
+    this.hasVisualLock = false;
+    this.fireCd = 2.5;
   }
 
   _buildHeliMesh() {
@@ -328,51 +332,93 @@ export class HelicopterAI {
     spotOrigin.quaternion.copy(q);
   }
 
-  // Smooth angular-velocity-damped searchlight gimbal so beam sweeps & lags realistically behind sharp player turns!
-  _aimSpotlightSmooth(targetPos, dt) {
+  // Smooth angular-velocity-damped searchlight gimbal with 3D raycast ceiling/roof/bridge occlusion!
+  _aimSpotlightSmooth(targetPos, dt, state) {
     if (!this.spotInitialized) {
       this.spotTargetPos.copy(targetPos);
+      this.lastSeenPos.copy(targetPos);
       this.spotInitialized = true;
     }
-    const trackRate = 1.9; // Smooth pursuit lag
-    const lagAlpha = 1 - Math.exp(-trackRate * dt);
-    this.spotTargetPos.lerp(targetPos, lagAlpha);
 
-    const { spotOrigin } = this.mesh.userData;
+    const { spotOrigin, cone } = this.mesh.userData;
     const worldOrigin = new THREE.Vector3();
     spotOrigin.getWorldPosition(worldOrigin);
-    const dir = new THREE.Vector3().subVectors(this.spotTargetPos, worldOrigin).normalize();
-    const localDir = dir.clone().applyQuaternion(this.mesh.quaternion.clone().invert());
-    const desiredQ = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), localDir);
 
-    // Cap gimbal angular slew rate (~1.2 rad/s) so spotlight never snaps instantaneously
+    const playerPt = new THREE.Vector3(targetPos.x, (targetPos.y ?? 0) + 1.15, targetPos.z);
+    const toPlayer = new THREE.Vector3().subVectors(playerPt, worldOrigin);
+    const distToPlayer = toPlayer.length() || 1;
+    const dirToPlayer = toPlayer.clone().divideScalar(distToPlayer);
+
+    // 3D Line-of-Sight raycast from HALCÓN-1 nose to player (blocked by overhead bridge decks, cover building roofs & towers!)
+    const losHit = (this.collisionWorld && !state?.diving)
+      ? this.collisionWorld.raycast(worldOrigin, dirToPlayer, Math.max(0.5, distToPlayer - 0.3), { ignoreTags: ['bus-stop'] })
+      : null;
+
+    if (state?.diving || losHit) {
+      // Player is hidden underwater, under a bridge underpass, or inside an enterable roofed cover building!
+      this.hasVisualLock = false;
+    } else {
+      this.hasVisualLock = true;
+      this.lastSeenPos.copy(playerPt);
+    }
+
+    // Track player when locked; search around last seen roof/area when hidden!
+    const aimDesired = this.hasVisualLock ? playerPt : this.lastSeenPos;
+    const trackRate = this.hasVisualLock ? 1.9 : 0.75;
+    const lagAlpha = 1 - Math.exp(-trackRate * dt);
+    this.spotTargetPos.lerp(aimDesired, lagAlpha);
+
+    const beamVec = new THREE.Vector3().subVectors(this.spotTargetPos, worldOrigin);
+    const beamDist = beamVec.length() || 1;
+    const beamDir = beamVec.clone().divideScalar(beamDist);
+
+    // Raycast the ACTUAL searchlight beam so the volumetric cone & pool stop cleanly on any roof/bridge deck above!
+    const beamHit = this.collisionWorld
+      ? this.collisionWorld.raycast(worldOrigin, beamDir, beamDist + 2.0, { ignoreTags: ['bus-stop'] })
+      : null;
+
+    const hitDist = beamHit ? beamHit.dist : beamDist;
+    const poolX = beamHit ? beamHit.point.x : this.spotTargetPos.x;
+    const poolY = beamHit ? beamHit.point.y + 0.16 : Math.max(0.14, (targetPos.y ?? 0) + 0.14);
+    const poolZ = beamHit ? beamHit.point.z : this.spotTargetPos.z;
+
+    // Scale spotlight cone height dynamically so it NEVER pierces through a roof or bridge deck!
+    if (cone) {
+      const coneScaleY = Math.max(0.12, Math.min(1.2, hitDist / 46));
+      cone.scale.set(1, coneScaleY, 1);
+    }
+
+    const localDir = beamDir.clone().applyQuaternion(this.mesh.quaternion.clone().invert());
+    const desiredQ = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), localDir);
     const maxStepRad = 1.25 * dt;
     spotOrigin.quaternion.rotateTowards(desiredQ, maxStepRad);
-    this.groundPool.position.set(this.spotTargetPos.x, 0.14, this.spotTargetPos.z);
+    this.groundPool.position.set(poolX, poolY, poolZ);
   }
 
-  update(dt, elapsed, state, targetPos) {
+  update(dt, elapsed, state, targetPos, combatSystem = null, onPlayerHit = null, audio = null) {
     const wasVis = this.mesh.visible;
     this.mesh.visible = state.airUnitDeployed;
     this.groundPool.visible = state.airUnitDeployed && state.signalJamTimer <= 0;
     if (!state.airUnitDeployed) {
       this.spotInitialized = false;
+      this.hasVisualLock = false;
       return;
     }
 
     if (!wasVis) {
-      // Initial smooth approach spawn from nearby airspace
-      this.mesh.position.set(targetPos.x + 65, 32, targetPos.z - 55);
+      this.mesh.position.set(targetPos.x + 28, 34, targetPos.z + 32);
       this.vel.set(0, 0, 0);
       this.spotTargetPos.copy(targetPos);
+      this.lastSeenPos.copy(targetPos);
       this.spotInitialized = true;
     }
 
-    // Weighty, rational banking orbit at ~20-26 m/s (never jerky or teleport-fast!)
+    // Orbit around player when visually locked, or around lastSeenPos when player hides under cover!
+    const orbitFocus = this.hasVisualLock ? targetPos : this.lastSeenPos;
     this.orbitAngle += dt * 0.44;
     const radius = 44;
-    const desiredX = targetPos.x + Math.cos(this.orbitAngle) * radius;
-    const desiredZ = targetPos.z + Math.sin(this.orbitAngle) * radius;
+    const desiredX = orbitFocus.x + Math.cos(this.orbitAngle) * radius;
+    const desiredZ = orbitFocus.z + Math.sin(this.orbitAngle) * radius;
     const desiredY = 27 + Math.sin(elapsed * 1.1) * 1.8;
 
     const toDesX = desiredX - this.mesh.position.x;
@@ -391,7 +437,6 @@ export class HelicopterAI {
     this.vel.z = THREE.MathUtils.lerp(this.vel.z, desVz, accel);
     this.vel.y = THREE.MathUtils.lerp(this.vel.y, desVy, accel);
 
-    // Clamp horizontal flight speed strictly to 26 m/s
     const hSpd = Math.hypot(this.vel.x, this.vel.z);
     if (hSpd > 26.0) {
       const s = 26.0 / hSpd;
@@ -401,9 +446,8 @@ export class HelicopterAI {
 
     this.mesh.position.addScaledVector(this.vel, dt);
 
-    // Smooth yaw toward flight/target direction + realistic aerodynamic banking roll & forward nose pitch
-    const lookDx = targetPos.x - this.mesh.position.x;
-    const lookDz = targetPos.z - this.mesh.position.z;
+    const lookDx = orbitFocus.x - this.mesh.position.x;
+    const lookDz = orbitFocus.z - this.mesh.position.z;
     const desiredYaw = Math.atan2(lookDx, lookDz);
     let yawDiff = desiredYaw - this.yaw;
     while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
@@ -420,7 +464,7 @@ export class HelicopterAI {
     this.mesh.rotation.z = this.bankRoll;
     this.mesh.updateMatrixWorld(true);
 
-    const { mainRotor, tailRotor, strobeRed, strobeBlue, tailBeacon, cone } = this.mesh.userData;
+    const { mainRotor, tailRotor, strobeRed, strobeBlue, tailBeacon, cone, spotOrigin } = this.mesh.userData;
     mainRotor.rotation.y += dt * 28;
     tailRotor.rotation.x += dt * 36;
     const pulse = Math.sin(elapsed * 14) > 0;
@@ -431,7 +475,27 @@ export class HelicopterAI {
     const jammed = state.signalJamTimer > 0;
     cone.visible = !jammed;
     if (!jammed) {
-      this._aimSpotlightSmooth(targetPos, dt);
+      this._aimSpotlightSmooth(targetPos, dt, state);
+      // Aerial sniper fire ONLY when visually locked (NEVER shoots through bridge decks or cover roofs!)
+      if (this.hasVisualLock && !state.statusOverlay && state.wantedLevel >= 4) {
+        this.fireCd -= dt;
+        if (this.fireCd <= 0) {
+          this.fireCd = state.wantedLevel >= 5 ? 1.8 : 2.6;
+          const orig = new THREE.Vector3();
+          spotOrigin.getWorldPosition(orig);
+          const tgt = new THREE.Vector3(targetPos.x + (Math.random() - 0.5) * 2.2, (targetPos.y ?? 0) + 1.1, targetPos.z + (Math.random() - 0.5) * 2.2);
+          const dir = tgt.clone().sub(orig);
+          const d = dir.length() || 1;
+          const hit = this.collisionWorld ? this.collisionWorld.raycast(orig, dir.clone().divideScalar(d), d - 0.3) : null;
+          if (!hit) {
+            if (combatSystem) combatSystem.spawnTracer(orig, tgt, 0x70c8ff, 0.042, 0.16);
+            if (audio) audio.playGunshot('carbine');
+            if (Math.random() < 0.28 && onPlayerHit) onPlayerHit(10);
+          }
+        }
+      }
+    } else {
+      this.hasVisualLock = false;
     }
   }
 }

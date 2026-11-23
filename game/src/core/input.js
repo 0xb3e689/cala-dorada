@@ -1,4 +1,5 @@
-// Keyboard and mouse input controller with Pointer Lock + smooth drag fallback for full 360-degree GTA mouse look.
+// Keyboard and mouse input controller with Pointer Lock + safe click-to-lock guard (never fires on re-lock)
+// and smooth drag fallback for full 360-degree GTA mouse look.
 
 export class InputController {
   constructor(canvas) {
@@ -11,6 +12,9 @@ export class InputController {
     this.lookDeltaY = 0;
     this.wheelDelta = 0;
     this.pointerLocked = false;
+    this.pointerLockEngagedAt = 0;
+    this.fireSuppressedUntil = 0;
+    this._pointerLockUnsupported = false;
     this.mouseX = window.innerWidth / 2;
     this.mouseY = window.innerHeight / 2;
     this._lastClientX = null;
@@ -23,14 +27,36 @@ export class InputController {
     this._bind();
   }
 
+  suppressFireFor(ms = 220) {
+    const until = performance.now() + ms;
+    if (until > this.fireSuppressedUntil) this.fireSuppressedUntil = until;
+    this.mouseDown = false;
+  }
+
+  canFireNow() {
+    if (!this.mouseDown) return false;
+    const now = performance.now();
+    if (now < this.fireSuppressedUntil) return false;
+    if (now - this.pointerLockEngagedAt < 200) return false;
+    // If pointer lock is eligible and supported, require active lock before firing
+    if (this.canPointerLock && this.canPointerLock() && !this._pointerLockUnsupported) {
+      if (document.pointerLockElement !== this.canvas) return false;
+    }
+    return true;
+  }
+
   requestPointerLockSafe() {
     try {
       if (document.pointerLockElement !== this.canvas && this.canvas.requestPointerLock) {
         const res = this.canvas.requestPointerLock();
-        if (res && typeof res.catch === 'function') res.catch(() => {});
+        if (res && typeof res.catch === 'function') {
+          res.catch(() => {
+            this._pointerLockUnsupported = true;
+          });
+        }
       }
     } catch {
-      // Headless or browser restriction; drag fallback remains active
+      this._pointerLockUnsupported = true;
     }
   }
 
@@ -74,10 +100,19 @@ export class InputController {
       this._lastClientX = e.clientX;
       this._lastClientY = e.clientY;
       if (e.button === 0) {
-        this.mouseDown = true;
-        if (this.canPointerLock && this.canPointerLock()) {
+        // Safe Pointer-Lock Click Guard: if not locked yet, acquire pointer lock and NEVER fire!
+        if (this.canPointerLock && this.canPointerLock() && document.pointerLockElement !== this.canvas) {
+          this.mouseDown = false;
+          this.suppressFireFor(220);
           this.requestPointerLockSafe();
+          return;
         }
+        const now = performance.now();
+        if (now < this.fireSuppressedUntil || now - this.pointerLockEngagedAt < 200) {
+          this.mouseDown = false;
+          return;
+        }
+        this.mouseDown = true;
       }
       if (e.button === 2) {
         this.rightMouseDown = true;
@@ -104,7 +139,6 @@ export class InputController {
       if (isLocked || this.rightMouseDown || leftDrag) {
         const dx = (e.movementX !== undefined && (isLocked || e.movementX !== 0)) ? e.movementX : (e.clientX - prevX);
         const dy = (e.movementY !== undefined && (isLocked || e.movementY !== 0)) ? e.movementY : (e.clientY - prevY);
-        // Clamp giant focus-jump deltas
         this.lookDeltaX += Math.max(-120, Math.min(120, dx));
         this.lookDeltaY += Math.max(-120, Math.min(120, dy));
       }
@@ -115,7 +149,17 @@ export class InputController {
     }, { passive: true });
 
     document.addEventListener('pointerlockchange', () => {
-      this.pointerLocked = document.pointerLockElement === this.canvas;
+      const locked = document.pointerLockElement === this.canvas;
+      if (locked && !this.pointerLocked) {
+        this.pointerLockEngagedAt = performance.now();
+        this._pointerLockUnsupported = false;
+        this.suppressFireFor(220);
+      }
+      this.pointerLocked = locked;
+    });
+
+    document.addEventListener('pointerlockerror', () => {
+      this._pointerLockUnsupported = true;
     });
   }
 

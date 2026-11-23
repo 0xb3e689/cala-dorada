@@ -83,13 +83,19 @@ function setupChaseShot(engine) {
   engine.police.clearAll();
   const u1 = engine.police.spawnUnit('SOL-14', false, 36.5, 195.8, -1.42, 'RAMMING');
   const u2 = engine.police.spawnUnit('SOL-07', false, 34.5, 208.2, -1.52, 'FLANKING');
-  const u3 = engine.police.spawnUnit('SWAT-2', true, 66.0, 201.5, -1.55, 'ROADBLOCK');
-  const u4 = engine.police.spawnUnit('SOL-22', false, 54.0, 207.4, -1.48, 'CLOSING IN');
-  const u5 = engine.police.spawnUnit('SOL-09', false, 80.0, 196.2, -1.56, 'FLANKING');
-  [u1, u2, u3, u4, u5].forEach((u, idx) => updatePoliceLightbar(u.mesh, 12.4, idx * 1.4));
+  const u3 = engine.police.spawnUnit('SWAT-2', true, 72.0, 201.5, -1.55, 'ROADBLOCK');
+  const u4 = engine.police.spawnUnit('SOL-22', false, 56.0, 207.0, -1.52, 'CLOSING IN');
+  const u5 = engine.police.spawnUnit('SOL-09', false, 88.0, 196.2, -1.56, 'FLANKING');
+  [u1, u2, u3, u4, u5].forEach((u, idx) => {
+    updatePoliceLightbar(u.mesh, 12.4, idx * 1.4);
+    const yNow = engine.collisionWorld.getBridgeDeckY(u.pos.x, u.pos.z);
+    const yAhead = engine.collisionWorld.getBridgeDeckY(u.pos.x + Math.sin(u.yaw) * 2.2, u.pos.z + Math.cos(u.yaw) * 2.2);
+    u.pos.y = yNow;
+    u.mesh.rotation.x = -Math.atan2(yAhead - yNow, 2.2);
+  });
 
   // Blazing exploding police wreck right on the Puente del Sol deck
-  const wreck = engine.police.spawnBurningWreckAt(49.5, 194.2, -0.78);
+  const wreck = engine.police.spawnBurningWreckAt(56.0, 194.2, -0.78);
   animateBurningWreck(wreck, 12.4);
 
   const scooter = createVehicleMesh('scooter', 0x34e0c8);
@@ -98,13 +104,13 @@ function setupChaseShot(engine) {
   engine.scene.add(scooter);
 
   const civRoadster = createVehicleMesh('convertible', 0xff5e7e);
-  civRoadster.position.set(112, 0, 206.8);
+  civRoadster.position.set(112, engine.collisionWorld.getBridgeDeckY(112, 206.8), 206.8);
   civRoadster.rotation.y = Math.PI / 2;
   const civSuv = createVehicleMesh('baja_runner', 0xf2b138);
-  civSuv.position.set(134, 0, 194.5);
+  civSuv.position.set(134, engine.collisionWorld.getBridgeDeckY(134, 194.5), 194.5);
   civSuv.rotation.y = -Math.PI / 2;
   const civCoupe = createVehicleMesh('cabo_gt', 0x39c2b8);
-  civCoupe.position.set(158, 0, 205.5);
+  civCoupe.position.set(158, engine.collisionWorld.getBridgeDeckY(158, 205.5), 205.5);
   civCoupe.rotation.y = Math.PI / 2;
   engine.scene.add(civRoadster, civSuv, civCoupe);
 
@@ -123,7 +129,7 @@ function setupChaseShot(engine) {
   });
 
   // Prominent HALCÓN-1 Helicopter in clear open sky + focused spotlight beam onto hero car
-  engine.heli.placeForShot(new THREE.Vector3(47.5, 20.4, 190.2), new THREE.Vector3(22.5, 0.8, 203.2), 0.16);
+  engine.heli.placeForShot(new THREE.Vector3(47.5, 22.8, 190.2), new THREE.Vector3(22.5, 0.8, 203.2), 0.16);
 
   engine.cameraOverride = {
     pos: new THREE.Vector3(10.6, 3.85, 211.2),
@@ -163,6 +169,7 @@ function setupCombatShot(engine) {
   s.weaponAmmo.smg = { clip: 28, reserve: 180 };
   s.crewHealth = { nadia: 88, toma: 100, sora: 94 };
   engine.player.applyAppearance(s.playerAppearance);
+  engine.selectWeapon(3, { closeWheel: false, silent: true });
   s.dialogue = {
     speaker: 'NADIA SOLIS',
     portrait: 'nadia',
@@ -312,7 +319,7 @@ function setupTitleShot(engine) {
   ];
   for (const [type, col, x, z, yaw] of titleTraffic) {
     const m = createVehicleMesh(type, col);
-    m.position.set(x, 0, z);
+    m.position.set(x, engine.collisionWorld.getBridgeDeckY(x, z), z);
     m.rotation.y = yaw;
     engine.scene.add(m);
   }

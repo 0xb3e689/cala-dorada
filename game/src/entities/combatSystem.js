@@ -1,9 +1,12 @@
-// 6-weapon combat system: magazine & reserve reload cycles with 3D reload animations for player, enemies & police,
-// immediate hit reactions/flinch on every shot target, dual-core tracers, sparks, and weapon damage popups (excluding vehicle ramming).
+// 6-weapon combat system with true 3D raycast occlusion (bullets CANNOT pierce buildings, walls, roofs, bridge decks, or cars),
+// shootable/destructible vehicles, killable enemies/police/NPCs with physical collapse death animations & crimson ground marks,
+// magazine reload cycles, hit-confirm crosshair & weapon-only damage popups.
 
 import * as THREE from '../../vendor/three.module.min.js';
 import { WEAPONS } from '../core/config.js';
-import { buildCharacterMesh, poseHumanCombat, poseHumanReload, poseHumanFlinch } from './playerController.js';
+import {
+  buildCharacterMesh, setCharacterWeaponMesh, poseHumanCombat, poseHumanReload, poseHumanFlinch, poseHumanCollapse,
+} from './playerController.js';
 import { getRadialGlowTexture } from './vehicleFactory.js';
 
 export class CombatSystem {
@@ -21,10 +24,18 @@ export class CombatSystem {
     this.hitConfirmTimer = 0;
     this.hitConfirmCrit = false;
     this.fireCooldown = 0;
+
+    this._bloodGeo = new THREE.CircleGeometry(0.56, 16);
+    this._bloodMat = new THREE.MeshBasicMaterial({
+      color: 0x6b0b16, transparent: true, opacity: 0.74, depthWrite: false,
+    });
   }
 
   clearEnemies() {
-    for (const e of this.enemies) this.group.remove(e.mesh);
+    for (const e of this.enemies) {
+      this.group.remove(e.mesh);
+      if (e.bloodMark) this.group.remove(e.bloodMark);
+    }
     this.enemies = [];
     this.damagePopups = [];
     this.hitConfirmTimer = 0;
@@ -36,10 +47,11 @@ export class CombatSystem {
       jacket: 0x1a3f4d, accent: 0xff4b5c, pants: 0x141822, skin: 0xcf9670, hair: 0x171414,
       outfitStyle: 'tactical', hairStyle: 'fade', accessory: 'aviators',
     });
+    setCharacterWeaponMesh(mesh, 'carbine');
     mesh.position.set(x, downed ? 0.22 : 0, z);
     mesh.rotation.y = yaw;
     if (downed) {
-      mesh.rotation.x = -Math.PI / 2;
+      poseHumanCollapse(mesh, 1, 1);
     } else {
       poseHumanCombat(mesh, true);
     }
@@ -55,7 +67,11 @@ export class CombatSystem {
       maxClip: 8,
       reloadTimer: 0,
       reloadDuration: 1.7,
+      dead: downed,
       downed,
+      deathTimer: downed ? 1.0 : 0,
+      fallSide: Math.random() < 0.5 ? 1 : -1,
+      bloodMark: null,
       attacking: !downed,
       muzzleTimer: 0,
       lastHitTimer: 0,
@@ -77,7 +93,6 @@ export class CombatSystem {
     }
   }
 
-  // Trigger manual or automatic weapon reload for player
   startPlayerReload(state, audio) {
     const weapon = WEAPONS[state.activeWeaponIdx];
     if (!weapon || weapon.melee) return false;
@@ -91,7 +106,7 @@ export class CombatSystem {
     return true;
   }
 
-  // Explicitly spawn floating damage numbers ONLY for weapons/melee — NEVER for car ramming (source === 'vehicle')!
+  // Spawn floating damage numbers ONLY for weapons/melee — NEVER for car ramming!
   spawnDamagePopup(worldPos, amount, crit = false, source = 'weapon') {
     if (source === 'vehicle') return;
     if (amount <= 0) return;
@@ -107,7 +122,7 @@ export class CombatSystem {
   }
 
   applyEnemyDamage(enemy, amount, hitPos, state, opts = {}) {
-    if (!enemy || enemy.downed) return;
+    if (!enemy || enemy.dead || enemy.downed) return { killed: false };
     const source = opts.source ?? 'weapon';
     const dmg = Math.max(1, Math.round(amount));
     enemy.hp = Math.max(0, enemy.hp - dmg);
@@ -115,19 +130,17 @@ export class CombatSystem {
     enemy.lastHitTimer = 0.28;
     enemy.flinchTimer = 0.28;
 
-    // Directional knockback on hit
     if (opts.dir) {
       const kb = source === 'vehicle' ? Math.min(16, (opts.impactSpeed ?? 12) * 0.7) : 1.8;
       enemy.knockVel.set(opts.dir.x * kb, 0, opts.dir.z * kb);
       if (source === 'vehicle') {
         enemy.knockdownTimer = Math.max(enemy.knockdownTimer ?? 0, 1.45);
       } else {
-        enemy.pos.x += opts.dir.x * 0.28;
-        enemy.pos.z += opts.dir.z * 0.28;
+        enemy.pos.x += opts.dir.x * 0.24;
+        enemy.pos.z += opts.dir.z * 0.24;
       }
     }
 
-    // Weapon & melee hits trigger hit-confirm crosshair + floating damage popups; vehicle ramming NEVER does!
     if (source !== 'vehicle') {
       const popupPos = (hitPos ? hitPos.clone() : enemy.pos.clone().add(new THREE.Vector3(0, 1.65, 0)));
       this.spawnDamagePopup(popupPos, dmg, Boolean(opts.crit), source);
@@ -135,22 +148,31 @@ export class CombatSystem {
       this.hitConfirmCrit = Boolean(opts.crit);
     }
 
-    if (enemy.hp <= 0 && !enemy.downed) {
+    if (enemy.hp <= 0 && !enemy.dead) {
+      enemy.dead = true;
       enemy.downed = true;
       enemy.attacking = false;
-      enemy.mesh.rotation.x = -Math.PI / 2;
-      enemy.mesh.position.y = 0.22;
+      enemy.deathTimer = 0.001;
+      enemy.knockdownTimer = 0;
       if (enemy.mesh.userData.muzzleFlash) enemy.mesh.userData.muzzleFlash.visible = false;
+      if (!enemy.bloodMark) {
+        const mark = new THREE.Mesh(this._bloodGeo, this._bloodMat);
+        mark.rotation.x = -Math.PI / 2;
+        mark.position.set(enemy.pos.x, enemy.pos.y + 0.04, enemy.pos.z);
+        this.group.add(mark);
+        enemy.bloodMark = mark;
+      }
+      poseHumanCollapse(enemy.mesh, 0.12, enemy.fallSide ?? 1);
       if (state) {
         state.careerStats.takedowns += 1;
         state.cash += enemy.isPolice ? 0 : 350;
         state.rp += enemy.isPolice ? 25 : 45;
       }
-      if (!enemy.isPolice) {
-        this.spawnPickup(enemy.pos.clone(), Math.random() < 0.5 ? 'health' : 'armor');
-      }
-      if (opts.onEnemyDown) opts.onEnemyDown();
+      this.spawnPickup(enemy.pos.clone(), enemy.isPolice ? 'armor' : (Math.random() < 0.5 ? 'health' : 'armor'));
+      if (opts.onEnemyDown) opts.onEnemyDown(enemy);
+      return { killed: true };
     }
+    return { killed: false };
   }
 
   spawnTracer(start, end, color = 0xffe073, radius = 0.04, life = 0.16) {
@@ -209,15 +231,38 @@ export class CombatSystem {
       new THREE.OctahedronGeometry(0.48, 0),
       new THREE.MeshBasicMaterial({ color: col })
     );
-    mesh.position.set(pos.x, 0.9, pos.z);
+    mesh.position.set(pos.x, pos.y + 0.9, pos.z);
     this.group.add(mesh);
     this.pickups.push({ mesh, kind, pos: mesh.position });
   }
 
+  // Exact ray vs vertical human capsule (y in [baseY+0.05, baseY+1.88], radius 0.62m)
+  _testHumanRay(origin, dir, maxDist, pos) {
+    const baseY = pos.y ?? 0;
+    const cx = pos.x - origin.x;
+    const cz = pos.z - origin.z;
+    const horizLenSq = dir.x * dir.x + dir.z * dir.z;
+    let t = 0;
+    if (horizLenSq > 1e-6) {
+      t = (cx * dir.x + cz * dir.z) / horizLenSq;
+    } else {
+      t = (baseY + 1.1 - origin.y) / (dir.y || 1);
+    }
+    if (t <= 0 || t >= maxDist) return null;
+    const hx = origin.x + dir.x * t;
+    const hy = origin.y + dir.y * t;
+    const hz = origin.z + dir.z * t;
+    if (hy < baseY - 0.1 || hy > baseY + 1.98) return null;
+    const perpXZ = Math.hypot(hx - pos.x, hz - pos.z);
+    if (perpXZ > 0.65) return null;
+    return { dist: t, perp: perpXZ, isHead: hy > baseY + 1.44 };
+  }
+
   tryPlayerFire(state, player, aimDir, audio, onEnemyDown, onCrime, extraTargets = {}) {
     if (this.fireCooldown > 0) return false;
-    if (state.reloadTimer > 0) return false; // Blocked while reloading!
-    const weapon = WEAPONS[state.activeWeaponIdx];
+    if (state.reloadTimer > 0) return false;
+    if (state.swimming) return false; // Cannot fire weapons while swimming
+    const weapon = WEAPONS[state.activeWeaponIdx] ?? WEAPONS[0];
     const ammo = state.weaponAmmo[weapon.id];
 
     if (!weapon.melee) {
@@ -227,21 +272,33 @@ export class CombatSystem {
       }
       ammo.clip -= 1;
       if (ammo.clip <= 0 && ammo.reserve > 0) {
-        // Trigger realistic reload cycle automatically after final round in magazine
         this.startPlayerReload(state, audio);
       }
     }
 
     this.fireCooldown = weapon.fireRate;
-    if (!weapon.melee) player.flashMuzzle(0.08);
+    if (weapon.melee) {
+      if (player.triggerMeleeSwing) player.triggerMeleeSwing();
+    } else {
+      if (player.setCombatPose) player.setCombatPose(true);
+      player.flashMuzzle(0.08);
+    }
     if (audio) audio.playGunshot(weapon.id);
-    if (onCrime) onCrime();
+    if (extraTargets.onRecoil && !weapon.melee) {
+      const kick = weapon.id === 'shotgun' ? 0.055 : weapon.id === 'carbine' ? 0.028 : weapon.id === 'pistol' ? 0.022 : 0.014;
+      extraTargets.onRecoil(kick);
+    }
+    if (onCrime) onCrime(weapon.melee ? 'melee' : 'gunshot');
 
-    const origin = player.getMuzzleWorldPos ? player.getMuzzleWorldPos() : player.pos.clone().add(new THREE.Vector3(0, 1.42, 0));
+    const rawOrigin = player.getMuzzleWorldPos ? player.getMuzzleWorldPos() : player.pos.clone().add(new THREE.Vector3(0, 1.42, 0));
+    const origin = rawOrigin.clone();
+    origin.y = Math.max((player.pos?.y ?? 0) + 1.18, origin.y);
     const pellets = weapon.pellets ?? 1;
     const hitTotals = new Map();
+    const vehicleHitTotals = new Map();
     const policeOfficers = extraTargets.footOfficers ?? [];
     const peds = extraTargets.peds ?? [];
+    const vehicles = extraTargets.vehicles ?? [];
 
     for (let p = 0; p < pellets; p++) {
       const dir = aimDir.clone();
@@ -250,25 +307,27 @@ export class CombatSystem {
       dir.z += (Math.random() - 0.5) * weapon.spread;
       dir.normalize();
 
+      // 1. Raycast against solid 3D world (buildings, walls, overhead roofs, bridge decks, piers, AND vehicles!) FIRST!
+      const envHit = this.collisionWorld
+        ? this.collisionWorld.raycast(origin, dir, weapon.range, { vehicles })
+        : null;
+
+      let bestDist = envHit ? envHit.dist : weapon.range;
       let hitTarget = null;
       let hitKind = null;
-      let bestDist = weapon.range;
-      let bestPerp = 99;
+      let hitHead = false;
 
+      // 2. Check ALL human pools strictly closer than the solid obstruction!
       const checkList = (arr, kind) => {
         for (const e of arr) {
-          if (e.downed) continue;
+          if (e.dead || e.downed) continue;
           const pos = e.pos ?? e.mesh.position;
-          const toE = pos.clone().add(new THREE.Vector3(0, 1.32, 0)).sub(origin);
-          const proj = toE.dot(dir);
-          if (proj > 0 && proj < bestDist) {
-            const perp = toE.clone().addScaledVector(dir, -proj).length();
-            if (perp < 0.85) {
-              bestDist = proj;
-              bestPerp = perp;
-              hitTarget = e;
-              hitKind = kind;
-            }
+          const res = this._testHumanRay(origin, dir, bestDist, pos);
+          if (res) {
+            bestDist = res.dist;
+            hitTarget = e;
+            hitKind = kind;
+            hitHead = res.isHead;
           }
         }
       };
@@ -281,21 +340,48 @@ export class CombatSystem {
       if (!weapon.melee) {
         this.spawnTracer(origin, endPoint, 0xffe47a, 0.038, 0.14);
       }
+
       if (hitTarget) {
-        const isCrit = bestPerp < 0.42 || Math.random() < 0.18;
-        const dmg = Math.round(weapon.damage * (isCrit ? 1.55 : 1.0));
+        const isCrit = hitHead || Math.random() < 0.15;
+        const dmg = Math.round(weapon.damage * (isCrit ? 1.5 : 1.0));
         const prev = hitTotals.get(hitTarget) ?? { kind: hitKind, dmg: 0, crit: false, pos: endPoint, dir };
         prev.dmg += dmg;
         prev.crit = prev.crit || isCrit;
         prev.pos = endPoint;
         hitTotals.set(hitTarget, prev);
         this.spawnSparks(endPoint, pellets > 1 ? 3 : 6, 0xff8040);
+      } else if (envHit) {
+        if (envHit.vehicle) {
+          const prev = vehicleHitTotals.get(envHit.vehicle) ?? {
+            dmg: 0,
+            point: new THREE.Vector3(envHit.point.x, envHit.point.y, envHit.point.z),
+            normal: envHit.normal,
+          };
+          prev.dmg += weapon.damage;
+          vehicleHitTotals.set(envHit.vehicle, prev);
+          this.spawnSparks(new THREE.Vector3(envHit.point.x, envHit.point.y, envHit.point.z), pellets > 1 ? 4 : 8, 0xffe073);
+        } else {
+          // Solid building/wall/bridge/roof obstruction ricochet spark!
+          this.spawnSparks(new THREE.Vector3(envHit.point.x, envHit.point.y, envHit.point.z), pellets > 1 ? 2 : 5, 0xffd27a);
+        }
       }
     }
 
+    // Apply human hits
     for (const [target, info] of hitTotals.entries()) {
       if (info.kind === 'ped') {
+        this.spawnDamagePopup(info.pos, info.dmg, info.crit, weapon.melee ? 'melee' : 'weapon');
+        this.hitConfirmTimer = 0.24;
+        this.hitConfirmCrit = info.crit;
         if (extraTargets.onPedShot) extraTargets.onPedShot(target, info.dmg, info.dir);
+      } else if (info.kind === 'police') {
+        const res = this.applyEnemyDamage(target, info.dmg, info.pos, state, {
+          source: weapon.melee ? 'melee' : 'weapon',
+          crit: info.crit,
+          dir: info.dir,
+          onEnemyDown: extraTargets.onPoliceKilled,
+        });
+        if (extraTargets.onPoliceShot) extraTargets.onPoliceShot(target, res.killed);
       } else {
         this.applyEnemyDamage(target, info.dmg, info.pos, state, {
           source: weapon.melee ? 'melee' : 'weapon',
@@ -305,10 +391,18 @@ export class CombatSystem {
         });
       }
     }
+
+    // Apply vehicle bullet hits
+    for (const [veh, info] of vehicleHitTotals.entries()) {
+      if (audio) audio.playMetalHit();
+      if (extraTargets.onVehicleShot) {
+        extraTargets.onVehicleShot(veh, info.dmg, info.point, info.normal);
+      }
+    }
     return true;
   }
 
-  update(dt, elapsed, state, playerPos, onPlayerHit, audio) {
+  update(dt, elapsed, state, playerPos, onPlayerHit, audio, vehicles = []) {
     if (this.fireCooldown > 0) this.fireCooldown -= dt;
     if (this.hitConfirmTimer > 0) this.hitConfirmTimer = Math.max(0, this.hitConfirmTimer - dt);
 
@@ -383,10 +477,22 @@ export class CombatSystem {
       }
     }
 
-    // Enemy AI with magazine reload cycle, 3D reload animation, hit reactions & knockdown recovery
+    // Enemy AI with 3D raycast bullet occlusion, collapse death animation & 25s despawn
     let alive = 0;
-    for (const e of this.enemies) {
-      if (e.downed) continue;
+    for (let i = this.enemies.length - 1; i >= 0; i--) {
+      const e = this.enemies[i];
+      if (e.dead || e.downed) {
+        e.deathTimer = (e.deathTimer ?? 0) + dt;
+        if (e.deathTimer <= 0.6) {
+          poseHumanCollapse(e.mesh, Math.min(1, e.deathTimer / 0.46), e.fallSide ?? 1);
+        }
+        if (e.deathTimer >= 25) {
+          this.group.remove(e.mesh);
+          if (e.bloodMark) this.group.remove(e.bloodMark);
+          this.enemies.splice(i, 1);
+        }
+        continue;
+      }
       alive++;
       if (e.lastHitTimer > 0) e.lastHitTimer = Math.max(0, e.lastHitTimer - dt);
       if (e.flinchTimer > 0) e.flinchTimer = Math.max(0, e.flinchTimer - dt);
@@ -406,6 +512,7 @@ export class CombatSystem {
         continue;
       }
       e.mesh.rotation.x = 0;
+      e.mesh.rotation.z = 0;
       e.mesh.position.y = 0;
 
       const dx = playerPos.x - e.pos.x;
@@ -431,13 +538,32 @@ export class CombatSystem {
             e.reloadTimer = e.reloadDuration;
             continue;
           }
+          const orig = e.pos.clone().add(new THREE.Vector3(0, 1.38, 0));
+          const tgt = playerPos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.6, 1.15, (Math.random() - 0.5) * 1.6));
+          const shotVec = tgt.clone().sub(orig);
+          const shotDist = shotVec.length() || 1;
+          const shotDir = shotVec.clone().divideScalar(shotDist);
+
+          // Raycast against buildings, walls, roofs, bridge decks & cars!
+          const envHit = this.collisionWorld
+            ? this.collisionWorld.raycast(orig, shotDir, shotDist, { vehicles })
+            : null;
+          if (envHit && envHit.dist < shotDist - 0.45) {
+            // Blocked by solid cover! Hold fire or clip tracer cleanly on obstruction
+            e.fireCd = 0.9 + Math.random() * 0.8;
+            if (Math.random() < 0.35) {
+              const stopPt = new THREE.Vector3(envHit.point.x, envHit.point.y, envHit.point.z);
+              this.spawnTracer(orig, stopPt, 0xff6b4a, 0.036, 0.14);
+              this.spawnSparks(stopPt, 4, 0xffd27a);
+            }
+            continue;
+          }
+
           e.clip -= 1;
           e.fireCd = 1.15 + Math.random() * 1.0;
           e.muzzleTimer = 0.09;
           if (e.mesh.userData.muzzleFlash) e.mesh.userData.muzzleFlash.visible = true;
           if (audio) audio.playGunshot('pistol');
-          const orig = e.pos.clone().add(new THREE.Vector3(0, 1.38, 0));
-          const tgt = playerPos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2.0, 1.2, (Math.random() - 0.5) * 2.0));
           this.spawnTracer(orig, tgt, 0xff6b4a, 0.036, 0.14);
           if (Math.random() < 0.36 && onPlayerHit) onPlayerHit(9);
           if (e.clip <= 0) e.reloadTimer = e.reloadDuration;

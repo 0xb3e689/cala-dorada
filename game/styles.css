@@ -42,6 +42,13 @@ html, body {
   transition: opacity 0.08s linear;
 }
 
+/* BLUE-TEAL UNDERWATER DIVING TINT */
+.underwater-tint {
+  position: fixed; inset: 0; pointer-events: none; z-index: 14;
+  background: radial-gradient(ellipse at center, rgba(14, 96, 128, 0.24) 22%, rgba(6, 52, 78, 0.56) 100%);
+  backdrop-filter: saturate(0.85) hue-rotate(-6deg);
+}
+
 /* GTA WASTED / BUSTED FULLSCREEN CINEMATIC OVERLAY */
 .status-overlay {
   position: fixed; inset: 0; pointer-events: none; z-index: 35;
@@ -142,6 +149,10 @@ html, body {
 .w-star.flash-blue {
   color: #4ea8ff;
   text-shadow: 0 0 14px rgba(78, 168, 255, 0.95), 0 2px 4px rgba(0, 0, 0, 0.9);
+}
+.w-star.hidden-dim {
+  opacity: 0.24;
+  text-shadow: none;
 }
 
 /* SINGLE ACTIVE WEAPON BADGE */

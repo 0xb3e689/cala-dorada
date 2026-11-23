@@ -1,10 +1,11 @@
-// High-density living city traffic and reactive NPCs with solid building collisions,
-// realistic panicked human running speeds (3.8-4.6 m/s), vehicle-hit knockdowns, and bullet hit reactions.
+// High-density living city traffic (shootable/destructible, riding elevated bridges cleanly) and reactive killable NPCs
+// with solid building collisions, realistic panicked speeds, vehicle-hit kills, bullet kills, collapse death animations & crimson marks.
 
 import * as THREE from '../../vendor/three.module.min.js';
+import { VEHICLES } from '../core/config.js';
 import { ROAD_X, ROAD_Z } from './cityPlan.js';
 import { createVehicleMesh } from '../entities/vehicleFactory.js';
-import { buildCharacterMesh, poseHumanStride, poseHumanFlinch } from '../entities/playerController.js';
+import { buildCharacterMesh, poseHumanStride, poseHumanFlinch, poseHumanCollapse } from '../entities/playerController.js';
 
 export class TrafficAndPeds {
   constructor(scene, collisionWorld = null) {
@@ -14,6 +15,10 @@ export class TrafficAndPeds {
     this.peds = [];
     this.group = new THREE.Group();
     this.scene.add(this.group);
+    this._bloodGeo = new THREE.CircleGeometry(0.56, 16);
+    this._bloodMat = new THREE.MeshBasicMaterial({
+      color: 0x6b0b16, transparent: true, opacity: 0.74, depthWrite: false,
+    });
 
     this._spawnTraffic();
     this._spawnPedestrians();
@@ -27,6 +32,35 @@ export class TrafficAndPeds {
     ];
     let idx = 0;
 
+    const pushCar = (mesh, type, axis, dir, laneCoord, speed, min, max) => {
+      const spec = VEHICLES[type] ?? VEHICLES.cabo_gt;
+      this.cars.push({
+        mesh,
+        type,
+        typeKey: type,
+        spec,
+        pos: mesh.position,
+        yaw: mesh.rotation.y,
+        vel: new THREE.Vector3(),
+        axis,
+        dir,
+        laneCoord,
+        speed,
+        curSpeed: speed,
+        min,
+        max,
+        hp: spec.maxHp,
+        maxHp: spec.maxHp,
+        condition: 100,
+        burning: false,
+        fireCountdown: 0,
+        exploded: false,
+        smokeTimer: 0,
+        crackleTimer: 0,
+        isTraffic: true,
+      });
+    };
+
     for (const rz of ROAD_Z) {
       const count = rz === 200 ? 8 : rz === 120 || rz === 0 ? 6 : 4;
       for (let i = 0; i < count; i++) {
@@ -37,15 +71,11 @@ export class TrafficAndPeds {
         const span = 680 / count;
         const x = -335 + i * span + (idx % 3) * 14;
         const z = rz + (dir > 0 ? 4.8 : -4.8);
-        mesh.position.set(x, 0, z);
+        const y = this.collisionWorld ? this.collisionWorld.getBridgeDeckY(x, z) : 0;
+        mesh.position.set(x, y, z);
         mesh.rotation.y = dir > 0 ? Math.PI / 2 : -Math.PI / 2;
         this.group.add(mesh);
-        this.cars.push({
-          mesh, type, axis: 'x', dir, laneCoord: z,
-          speed: type === 'scooter' ? 11.5 : 14.5 + (idx % 5) * 2.2,
-          curSpeed: type === 'scooter' ? 11.5 : 14.5,
-          min: -355, max: 355,
-        });
+        pushCar(mesh, type, 'x', dir, z, type === 'scooter' ? 11.5 : 14.5 + (idx % 5) * 2.2, -355, 355);
         idx++;
       }
     }
@@ -62,12 +92,7 @@ export class TrafficAndPeds {
         mesh.position.set(x, 0, z);
         mesh.rotation.y = dir > 0 ? 0 : Math.PI;
         this.group.add(mesh);
-        this.cars.push({
-          mesh, type, axis: 'z', dir, laneCoord: x,
-          speed: type === 'scooter' ? 11.0 : 13.5 + (idx % 4) * 2.2,
-          curSpeed: type === 'scooter' ? 11.0 : 13.5,
-          min: -345, max: 205,
-        });
+        pushCar(mesh, type, 'z', dir, x, type === 'scooter' ? 11.0 : 13.5 + (idx % 4) * 2.2, -345, 205);
         idx++;
       }
     }
@@ -125,8 +150,9 @@ export class TrafficAndPeds {
     for (let i = 0; i < 20; i++) {
       const laneZ = i < 10 ? 14 : -14;
       const x = -170 + (i % 10) * 44;
+      if (x > 125 && x < 170) continue; // Keep clear of Río Dorado river channel
       const role = i % 5 === 0 ? 'officer' : i % 4 === 0 ? 'enforcer' : 'commuter';
-      spawnList.push({ x, z: laneZ, axis: 'x', role, min: -260, max: 320 });
+      spawnList.push({ x, z: laneZ, axis: 'x', role, min: -260, max: 120 });
     }
 
     spawnList.forEach((sp, i) => {
@@ -136,6 +162,7 @@ export class TrafficAndPeds {
       if (sp.facing !== undefined) ped.rotation.y = sp.facing;
       else if (sp.stationary) ped.rotation.y = (i % 6) * 1.05;
       this.group.add(ped);
+      const maxHp = sp.role === 'officer' ? 90 : 55;
       this.peds.push({
         mesh: ped,
         pos: ped.position,
@@ -146,9 +173,14 @@ export class TrafficAndPeds {
         min: sp.min ?? -330,
         max: sp.max ?? 330,
         baseSpeed: sp.role === 'jogger' ? 3.5 : sp.role === 'officer' ? 1.9 : 1.7 + (i % 3) * 0.25,
-        fleeSpeed: 3.8 + (i % 5) * 0.2, // Strictly capped natural human running speed: 3.8 - 4.6 m/s!
-        hp: 65,
+        fleeSpeed: 3.8 + (i % 5) * 0.2,
+        hp: maxHp,
+        maxHp,
+        dead: false,
         downed: false,
+        deathTimer: 0,
+        fallSide: i % 2 === 0 ? 1 : -1,
+        bloodMark: null,
         panicTimer: 0,
         fleeYaw: 0,
         flinchTimer: 0,
@@ -159,9 +191,26 @@ export class TrafficAndPeds {
     });
   }
 
+  _killPed(ped) {
+    if (ped.dead) return;
+    ped.hp = 0;
+    ped.dead = true;
+    ped.downed = true;
+    ped.deathTimer = 0.001;
+    ped.knockdownTimer = 0;
+    if (!ped.bloodMark) {
+      const mark = new THREE.Mesh(this._bloodGeo, this._bloodMat);
+      mark.rotation.x = -Math.PI / 2;
+      mark.position.set(ped.mesh.position.x, 0.04, ped.mesh.position.z);
+      this.group.add(mark);
+      ped.bloodMark = mark;
+    }
+    poseHumanCollapse(ped.mesh, 0.12, ped.fallSide);
+  }
+
   triggerPanicNear(pos, radius = 48) {
     for (const p of this.peds) {
-      if (p.role === 'vendor' || p.downed) continue;
+      if (p.role === 'vendor' || p.dead || p.downed) continue;
       const dx = p.mesh.position.x - pos.x;
       const dz = p.mesh.position.z - pos.z;
       if (dx * dx + dz * dz < radius * radius) {
@@ -172,58 +221,69 @@ export class TrafficAndPeds {
   }
 
   applyPedShot(ped, dmg, dir) {
-    if (!ped || ped.downed) return;
-    ped.hp = Math.max(0, ped.hp - dmg);
+    if (!ped || ped.dead || ped.downed) return { killed: false };
+    ped.hp = Math.max(0, ped.hp - Math.max(1, Math.round(dmg)));
     ped.flinchTimer = 0.28;
     ped.panicTimer = 7.0;
     if (dir) {
       ped.fleeYaw = Math.atan2(dir.x, dir.z);
-      ped.mesh.position.x += dir.x * 0.24;
-      ped.mesh.position.z += dir.z * 0.24;
+      ped.mesh.position.x += dir.x * 0.22;
+      ped.mesh.position.z += dir.z * 0.22;
     }
     if (ped.hp <= 0) {
-      ped.downed = true;
-      ped.mesh.rotation.x = -Math.PI / 2;
-      ped.mesh.position.y = 0.18;
+      this._killPed(ped);
+      return { killed: true };
     }
+    return { killed: false };
   }
 
   applyPedVehicleImpact(ped, dirX, dirZ, speed) {
-    if (!ped || ped.downed) return false;
+    if (!ped || ped.dead || ped.downed) return { hit: false, killed: false };
     const force = Math.min(18, Math.max(5.5, speed * 0.72));
     ped.knockVel.set(dirX * force, 0, dirZ * force);
     ped.knockdownTimer = 1.65;
     ped.flinchTimer = 0.32;
     ped.panicTimer = 7.0;
     ped.fleeYaw = Math.atan2(dirX, dirZ);
-    const dmg = Math.round(speed * 2.5);
+    const dmg = Math.round(speed * 3.2);
     ped.hp = Math.max(0, ped.hp - dmg);
     if (ped.hp <= 0) {
-      ped.downed = true;
-      ped.mesh.rotation.x = -Math.PI / 2;
-      ped.mesh.position.y = 0.18;
+      this._killPed(ped);
+      return { hit: true, killed: true };
     }
-    return true;
+    return { hit: true, killed: false };
   }
 
   update(dt, elapsed, playerPos, panicActive) {
     // Update civilian cars
     for (const c of this.cars) {
+      if (c.exploded || c.burning) {
+        c.curSpeed = 0;
+        continue;
+      }
       const dx = c.mesh.position.x - playerPos.x;
       const dz = c.mesh.position.z - playerPos.z;
       const nearPlayer = dx * dx + dz * dz < 85;
-      const spd = nearPlayer ? c.speed * 0.32 : c.speed;
+      const condMul = c.hp / Math.max(1, c.maxHp) < 0.45 ? 0.55 : 1.0;
+      const spd = (nearPlayer ? c.speed * 0.32 : c.speed) * condMul;
       c.curSpeed = spd;
 
       if (c.axis === 'x') {
         c.mesh.position.x += c.dir * spd * dt;
         if (c.mesh.position.x > c.max) c.mesh.position.x = c.min;
         if (c.mesh.position.x < c.min) c.mesh.position.x = c.max;
+        if (this.collisionWorld) {
+          const yNow = this.collisionWorld.getBridgeDeckY(c.mesh.position.x, c.mesh.position.z);
+          const yAhead = this.collisionWorld.getBridgeDeckY(c.mesh.position.x + c.dir * 2.2, c.mesh.position.z);
+          c.mesh.position.y = yNow;
+          c.mesh.rotation.x = -Math.atan2(yAhead - yNow, 2.2);
+        }
       } else {
         c.mesh.position.z += c.dir * spd * dt;
         if (c.mesh.position.z > c.max) c.mesh.position.z = c.min;
         if (c.mesh.position.z < c.min) c.mesh.position.z = c.max;
       }
+      c.yaw = c.mesh.rotation.y;
       for (const w of c.mesh.userData?.wheels ?? []) {
         w.rotation.x += spd * dt * 1.6;
       }
@@ -231,9 +291,22 @@ export class TrafficAndPeds {
 
     const tmpVel = new THREE.Vector3();
 
-    // Update pedestrians
-    for (const p of this.peds) {
-      if (p.downed) continue;
+    // Update pedestrians (including smooth death collapse animation & 25s despawn cleanup)
+    for (let i = this.peds.length - 1; i >= 0; i--) {
+      const p = this.peds[i];
+      if (p.dead || p.downed) {
+        p.deathTimer += dt;
+        if (p.deathTimer <= 0.6) {
+          poseHumanCollapse(p.mesh, Math.min(1, p.deathTimer / 0.46), p.fallSide);
+        }
+        if (p.deathTimer >= 25) {
+          this.group.remove(p.mesh);
+          if (p.bloodMark) this.group.remove(p.bloodMark);
+          this.peds.splice(i, 1);
+        }
+        continue;
+      }
+
       if (p.flinchTimer > 0) p.flinchTimer = Math.max(0, p.flinchTimer - dt);
 
       // Car-hit tumble/knockdown & smooth get-up recovery
@@ -248,6 +321,7 @@ export class TrafficAndPeds {
         continue;
       }
       p.mesh.rotation.x = 0;
+      p.mesh.rotation.z = 0;
       p.mesh.position.y = 0;
 
       if (panicActive && p.role !== 'vendor') {
@@ -260,13 +334,13 @@ export class TrafficAndPeds {
 
       if (p.panicTimer > 0) {
         p.panicTimer -= dt;
-        const spd = p.fleeSpeed; // Strictly 3.8 - 4.6 m/s!
+        const spd = p.fleeSpeed;
         tmpVel.set(Math.sin(p.fleeYaw) * spd, 0, Math.cos(p.fleeYaw) * spd);
         if (this.collisionWorld) {
           const hit = this.collisionWorld.moveAndSlide(p.mesh.position, tmpVel, 0.5, dt);
           if (hit.hit) p.fleeYaw += 1.2;
-          if (this.collisionWorld.getWaterDepth(p.mesh.position.x, p.mesh.position.z) > 0.4) {
-            p.fleeYaw = Math.PI; // Turn away from ocean
+          if (this.collisionWorld.getWaterDepth(p.mesh.position.x, p.mesh.position.z, 0) > 0.4) {
+            p.fleeYaw += Math.PI * 0.75;
           }
         } else {
           p.mesh.position.x += tmpVel.x * dt;
@@ -287,7 +361,7 @@ export class TrafficAndPeds {
           p.mesh.rotation.y = p.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
           if (this.collisionWorld) {
             const hit = this.collisionWorld.moveAndSlide(p.mesh.position, tmpVel, 0.5, dt);
-            if (hit.hit) p.dir *= -1;
+            if (hit.hit || this.collisionWorld.getWaterDepth(p.mesh.position.x, p.mesh.position.z, 0) > 0.35) p.dir *= -1;
           } else {
             p.mesh.position.x += tmpVel.x * dt;
           }
@@ -297,7 +371,7 @@ export class TrafficAndPeds {
           p.mesh.rotation.y = p.dir > 0 ? 0 : Math.PI;
           if (this.collisionWorld) {
             const hit = this.collisionWorld.moveAndSlide(p.mesh.position, tmpVel, 0.5, dt);
-            if (hit.hit) p.dir *= -1;
+            if (hit.hit || this.collisionWorld.getWaterDepth(p.mesh.position.x, p.mesh.position.z, 0) > 0.35) p.dir *= -1;
           } else {
             p.mesh.position.z += tmpVel.z * dt;
           }

@@ -1,5 +1,8 @@
-// Dedicated spatial-hashed solid AABB collision world + natural coastal water depth queries for Cala Dorada.
-// Prevents vehicles, player, police, and NPCs from ever clipping through buildings, bridge rails, walls, or large props.
+// Spatial-hashed 3D AABB collision world with overhead ceiling/bridge-deck slabs, true 3D raycast occlusion
+// (buildings, roofs, walls, pillars & vehicles), elevated bridge decks with hollow passable underpasses,
+// and navigable Río Dorado river + Marina Bay + coastal ocean depth queries.
+
+import { getRiverCenterX, getRiverHalfWidth, RIVER_BRIDGES } from './cityPlan.js';
 
 export class CollisionWorld {
   constructor(cellSize = 48) {
@@ -8,9 +11,9 @@ export class CollisionWorld {
     this.grid = new Map();
   }
 
-  addBox(minX, maxX, minZ, maxZ, height = 10, tag = 'building') {
-    if (maxX <= minX || maxZ <= minZ) return null;
-    const box = { minX, maxX, minZ, maxZ, height, tag };
+  addBox(minX, maxX, minZ, maxZ, height = 10, tag = 'building', minY = 0) {
+    if (maxX <= minX || maxZ <= minZ || height <= minY) return null;
+    const box = { minX, maxX, minY, maxY: height, height, minZ, maxZ, tag };
     this.colliders.push(box);
 
     const cx0 = Math.floor(minX / this.cellSize);
@@ -31,8 +34,12 @@ export class CollisionWorld {
     return box;
   }
 
-  addRect(cx, cz, width, depth, height = 10, tag = 'building') {
-    return this.addBox(cx - width * 0.5, cx + width * 0.5, cz - depth * 0.5, cz + depth * 0.5, height, tag);
+  addBox3D(minX, maxX, minY, maxY, minZ, maxZ, tag = 'roof') {
+    return this.addBox(minX, maxX, minZ, maxZ, maxY, tag, minY);
+  }
+
+  addRect(cx, cz, width, depth, height = 10, tag = 'building', minY = 0) {
+    return this.addBox(cx - width * 0.5, cx + width * 0.5, cz - depth * 0.5, cz + depth * 0.5, height, tag, minY);
   }
 
   queryNearby(minX, maxX, minZ, maxZ) {
@@ -58,11 +65,170 @@ export class CollisionWorld {
     return out;
   }
 
-  // Resolve a circle (x, z, radius) against all nearby AABB colliders.
-  // Returns { hit, normalX, normalZ, impactSpeed, tag }
+  // Exact 3D Ray-vs-AABB slab intersection returning { dist, normalX, normalY, normalZ } or null
+  _intersectRayAABB(ox, oy, oz, dx, dy, dz, minX, maxX, minY, maxY, minZ, maxZ, maxDist) {
+    let tMin = 0;
+    let tMax = maxDist;
+    let nx = 0;
+    let ny = 0;
+    let nz = 0;
+
+    // X slab
+    if (Math.abs(dx) < 1e-8) {
+      if (ox < minX || ox > maxX) return null;
+    } else {
+      const inv = 1 / dx;
+      let t1 = (minX - ox) * inv;
+      let t2 = (maxX - ox) * inv;
+      let s = -1;
+      if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; s = 1; }
+      if (t1 > tMin) { tMin = t1; nx = s; ny = 0; nz = 0; }
+      if (t2 < tMax) tMax = t2;
+      if (tMin > tMax) return null;
+    }
+
+    // Y slab
+    if (Math.abs(dy) < 1e-8) {
+      if (oy < minY || oy > maxY) return null;
+    } else {
+      const inv = 1 / dy;
+      let t1 = (minY - oy) * inv;
+      let t2 = (maxY - oy) * inv;
+      let s = -1;
+      if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; s = 1; }
+      if (t1 > tMin) { tMin = t1; nx = 0; ny = s; nz = 0; }
+      if (t2 < tMax) tMax = t2;
+      if (tMin > tMax) return null;
+    }
+
+    // Z slab
+    if (Math.abs(dz) < 1e-8) {
+      if (oz < minZ || oz > maxZ) return null;
+    } else {
+      const inv = 1 / dz;
+      let t1 = (minZ - oz) * inv;
+      let t2 = (maxZ - oz) * inv;
+      let s = -1;
+      if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; s = 1; }
+      if (t1 > tMin) { tMin = t1; nx = 0; ny = 0; nz = s; }
+      if (t2 < tMax) tMax = t2;
+      if (tMin > tMax) return null;
+    }
+
+    if (tMin < 0 || tMin > maxDist) return null;
+    return { dist: tMin, normalX: nx, normalY: ny, normalZ: nz };
+  }
+
+  // Rock-solid 3D Raycast against all world AABBs (buildings, overhead roofs, bridge decks, walls, pillars)
+  // AND optional oriented vehicle bounding boxes (opts.vehicles).
+  // Returns null or { dist, point: { x, y, z }, normal: { x, y, z }, tag, box, vehicle }
+  raycast(origin, dir, maxDist = 120, opts = {}) {
+    const ox = origin.x;
+    const oy = origin.y;
+    const oz = origin.z;
+    const len = Math.hypot(dir.x, dir.y, dir.z) || 1;
+    const dx = dir.x / len;
+    const dy = dir.y / len;
+    const dz = dir.z / len;
+
+    const ex = ox + dx * maxDist;
+    const ez = oz + dz * maxDist;
+    const candidates = this.queryNearby(
+      Math.min(ox, ex) - 2,
+      Math.max(ox, ex) + 2,
+      Math.min(oz, ez) - 2,
+      Math.max(oz, ez) + 2
+    );
+
+    const ignoreTags = opts.ignoreTags ?? null;
+    let best = null;
+    let bestDist = maxDist;
+
+    for (let i = 0; i < candidates.length; i++) {
+      const b = candidates[i];
+      if (ignoreTags && (Array.isArray(ignoreTags) ? ignoreTags.includes(b.tag) : ignoreTags.has(b.tag))) continue;
+      const hit = this._intersectRayAABB(ox, oy, oz, dx, dy, dz, b.minX, b.maxX, b.minY, b.maxY, b.minZ, b.maxZ, bestDist);
+      if (hit && hit.dist < bestDist) {
+        bestDist = hit.dist;
+        best = {
+          dist: hit.dist,
+          point: { x: ox + dx * hit.dist, y: oy + dy * hit.dist, z: oz + dz * hit.dist },
+          normal: { x: hit.normalX, y: hit.normalY, z: hit.normalZ },
+          tag: b.tag,
+          box: b,
+          vehicle: null,
+        };
+      }
+    }
+
+    // Optional oriented bounding box raycast against all active vehicles
+    const vehicles = opts.vehicles;
+    if (vehicles && vehicles.length > 0) {
+      const ignoreVeh = opts.ignoreVehicle ?? null;
+      for (let i = 0; i < vehicles.length; i++) {
+        const v = vehicles[i];
+        if (!v || v === ignoreVeh) continue;
+        const vPos = v.pos ?? v.mesh?.position;
+        if (!vPos) continue;
+        const spec = v.spec ?? v.mesh?.userData?.spec ?? { width: 2.2, length: 4.8, height: 1.5 };
+        const yaw = v.yaw ?? v.mesh?.rotation?.y ?? 0;
+
+        // Broad-phase sphere reject
+        const rx = vPos.x - ox;
+        const ry = (vPos.y + spec.height * 0.5) - oy;
+        const rz = vPos.z - oz;
+        const proj = rx * dx + ry * dy + rz * dz;
+        if (proj < -4 || proj > bestDist + 4) continue;
+
+        // Transform ray into vehicle local frame (inverse of Three.js Y-rotation by +yaw)
+        const cosY = Math.cos(yaw);
+        const sinY = Math.sin(yaw);
+        const relX = ox - vPos.x;
+        const relY = oy - vPos.y;
+        const relZ = oz - vPos.z;
+        const lox = relX * cosY - relZ * sinY;
+        const loz = relX * sinY + relZ * cosY;
+        const ldx = dx * cosY - dz * sinY;
+        const ldz = dx * sinY + dz * cosY;
+
+        const hw = (spec.width ?? 2.2) * 0.56;
+        const hl = (spec.length ?? 4.8) * 0.54;
+        const hh = (spec.height ?? 1.5) + 0.25;
+        const hit = this._intersectRayAABB(lox, relY, loz, ldx, dy, ldz, -hw, hw, 0.05, hh, -hl, hl, bestDist);
+        if (hit && hit.dist < bestDist) {
+          bestDist = hit.dist;
+          const wnx = hit.normalX * cosY + hit.normalZ * sinY;
+          const wnz = -hit.normalX * sinY + hit.normalZ * cosY;
+          best = {
+            dist: hit.dist,
+            point: { x: ox + dx * hit.dist, y: oy + dy * hit.dist, z: oz + dz * hit.dist },
+            normal: { x: wnx, y: hit.normalY, z: wnz },
+            tag: 'vehicle',
+            box: null,
+            vehicle: v,
+          };
+        }
+      }
+    }
+
+    return best;
+  }
+
+  hasLineOfSight(from, to, opts = {}) {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const dz = to.z - from.z;
+    const dist = Math.hypot(dx, dy, dz);
+    if (dist < 0.2) return true;
+    const hit = this.raycast(from, { x: dx / dist, y: dy / dist, z: dz / dist }, Math.max(0.1, dist - 0.2), opts);
+    return hit === null;
+  }
+
+  // Resolve a circle (x, z, radius) against all nearby AABB colliders respecting 3D vertical clearance (minY..maxY).
   resolveCircle(pos, vel, radius, opts = {}) {
     const bounce = opts.bounce ?? 0;
     const entityY = pos.y ?? 0;
+    const entityHeight = opts.entityHeight ?? 1.85;
     let anyHit = false;
     let bestImpact = 0;
     let outNx = 0;
@@ -75,7 +241,8 @@ export class CollisionWorld {
 
       for (let i = 0; i < candidates.length; i++) {
         const c = candidates[i];
-        if (entityY >= c.height) continue;
+        // Respect vertical 3D clearance: walk/drive cleanly UNDER overhead bridge decks & cover roofs!
+        if (entityY >= c.maxY - 0.1 || (entityY + entityHeight) <= c.minY + 0.05) continue;
 
         const closestX = Math.max(c.minX, Math.min(pos.x, c.maxX));
         const closestZ = Math.max(c.minZ, Math.min(pos.z, c.maxZ));
@@ -95,7 +262,6 @@ export class CollisionWorld {
           nz = dz / dist;
           pen = radius - dist;
         } else {
-          // Center is inside the box; push out along minimum axis
           const dl = Math.abs(pos.x - c.minX);
           const dr = Math.abs(c.maxX - pos.x);
           const dt = Math.abs(pos.z - c.minZ);
@@ -124,7 +290,6 @@ export class CollisionWorld {
             }
             vel.x -= (1 + bounce) * vn * nx;
             vel.z -= (1 + bounce) * vn * nz;
-            // Friction along tangent on scrape
             if (opts.tangentDamp) {
               const tx = -nz;
               const tz = nx;
@@ -142,7 +307,6 @@ export class CollisionWorld {
     return { hit: anyHit, normalX: outNx, normalZ: outNz, impactSpeed: bestImpact, tag: hitTag };
   }
 
-  // Sub-stepped movement + solid collision resolution so fast cars or running characters NEVER tunnel through walls.
   moveAndSlide(pos, vel, radius, dt, opts = {}) {
     const dx = vel.x * dt;
     const dz = vel.z * dt;
@@ -169,50 +333,82 @@ export class CollisionWorld {
     return result;
   }
 
-  // Check if a point is on the Puente del Sol bridge roadway deck (dry road over the marina bay channel)
-  isOnBridgeDeck(x, z) {
-    return x >= 37 && x <= 183 && z >= 188.0 && z <= 212.0;
+  // Smooth elevated roadway deck height for Puente del Sol and all Río Dorado river bridges
+  getBridgeDeckY(x, z) {
+    for (let i = 0; i < RIVER_BRIDGES.length; i++) {
+      const b = RIVER_BRIDGES[i];
+      if (Math.abs(z - b.z) > b.halfZ) continue;
+      if (x < b.x1 || x > b.x2) continue;
+      const distFromWest = x - b.x1;
+      const distFromEast = b.x2 - x;
+      const minEdge = Math.min(distFromWest, distFromEast);
+      if (minEdge >= b.rampLen) return b.deckY;
+      const t = Math.max(0, Math.min(1, minEdge / b.rampLen));
+      // Smooth Hermite S-curve ramp
+      return b.deckY * (t * t * (3 - 2 * t));
+    }
+    return 0;
+  }
+
+  // Returns the road/ground surface elevation for an entity at currentY:
+  // Entities approaching along ramps ride smoothly up onto the elevated bridge deck;
+  // Entities walking/swimming/driving UNDERNEATH (currentY < deckY - 2.0) stay cleanly on the ground/river at y = 0!
+  getSurfaceY(x, z, currentY = 0) {
+    const deckY = this.getBridgeDeckY(x, z);
+    if (deckY > 0.01 && currentY >= deckY - 2.15) {
+      return deckY;
+    }
+    return 0;
+  }
+
+  // Check if a point is on top of a bridge deck
+  isOnBridgeDeck(x, z, entityY = 6) {
+    const deckY = this.getBridgeDeckY(x, z);
+    return deckY > 0.15 && entityY >= deckY - 2.15;
   }
 
   // Check if a point is on a wooden fishing pier
   isOnPier(x, z) {
-    // Paseo Dorado fishing pier (x=-210, width 5.2, z=249..291)
     if (Math.abs(x - (-210)) <= 3.0 && z >= 245 && z <= 292) return true;
-    // Bahia Esmeralda marina pier (x=225, width 6.5, z=272..324)
     if (Math.abs(x - 225) <= 3.6 && z >= 268 && z <= 325) return true;
     return false;
   }
 
-  // Natural physical water boundary depth (0 = dry land/sand/bridge/pier, 0..1.1 = shallow surf, >1.1 = deep water)
-  getWaterDepth(x, z) {
-    if (this.isOnBridgeDeck(x, z) || this.isOnPier(x, z)) return 0;
+  // Physical water depth: 0 = dry land/sand/pier/on top of bridge, 0..1.0 = shallow bank/surf, 1.0..4.5 = swimmable/divable water!
+  getWaterDepth(x, z, entityY = 0) {
+    if (this.isOnBridgeDeck(x, z, entityY) || this.isOnPier(x, z)) return 0;
 
     let depth = 0;
-    // South open ocean shoreline (gentle surf starting at z = 276)
-    if (z > 276) {
-      depth = Math.max(depth, (z - 276) * 0.085);
+
+    // 1. South open ocean shoreline (gentle beach slope starting at z = 274)
+    if (z > 274) {
+      depth = Math.max(depth, Math.min(4.8, (z - 274) * 0.14));
     }
 
-    // Marina Bay channel cutting north under Puente del Sol (x in [40..180], z in [156..276])
-    if (x > 40 && x < 180 && z > 156 && z <= 278) {
-      const edgeDist = Math.min(x - 40, 180 - x, z - 156);
-      depth = Math.max(depth, Math.min(2.6, edgeDist * 0.14));
+    // 2. Marina Bay channel cutting north under Puente del Sol (x in [52..168], z in [156..278])
+    // Note: leaves dry concrete underpass walkways on [40..52] and [168..180] so players can walk/drive OR swim under Puente del Sol!
+    if (x > 52 && x < 168 && z > 156 && z <= 278) {
+      const edgeDist = Math.min(x - 52, 168 - x, z - 156);
+      depth = Math.max(depth, Math.min(3.8, edgeDist * 0.26));
+    }
+
+    // 3. Scenic Navigable River: RÍO DORADO (z from -438 to 165)
+    if (z >= -438 && z <= 165) {
+      const cx = getRiverCenterX(z);
+      const hw = getRiverHalfWidth(z);
+      const distFromCenter = Math.abs(x - cx);
+      if (distFromCenter < hw) {
+        const edgeDist = hw - distFromCenter;
+        depth = Math.max(depth, Math.min(3.5, edgeDist * 0.42));
+      }
     }
 
     return depth;
   }
 
-  // Direction pointing smoothly back toward nearest dry shoreline when wading/swimming in deep water
+  // Gentle push back ONLY if swimming way out into the far open ocean (z > 380) so river & bay are 100% freely navigable
   getShoreReturnVector(x, z) {
-    // Inside Marina Bay channel
-    if (x > 40 && x < 180 && z > 156 && z <= 278) {
-      const dWest = x - 40;
-      const dEast = 180 - x;
-      const dNorth = z - 156;
-      if (dNorth <= dWest && dNorth <= dEast) return { x: 0, z: -1 };
-      return dWest < dEast ? { x: -1, z: 0 } : { x: 1, z: 0 };
-    }
-    // South ocean: push north toward golden beach
-    return { x: 0, z: -1 };
+    if (z > 380) return { x: 0, z: -1 };
+    return { x: 0, z: 0 };
   }
 }

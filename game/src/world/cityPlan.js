@@ -24,12 +24,12 @@ export const PUBLIC_FACILITIES = {
     id: 'cdpd-precinct',
     name: 'CDPD Precinct HQ',
     shortName: 'CDPD HQ',
-    x: 118,
+    x: 108,
     z: -124,
-    spawnX: 118,
+    spawnX: 108,
     spawnZ: -96,
     spawnYaw: 0,
-    carX: 136,
+    carX: 122,
     carZ: -96,
     color: '#4ba3ff',
   },
@@ -116,8 +116,48 @@ export const GARDEN_SITES = [
 ];
 
 export const ROOF_REPAIR_SITES = [
-  { id: 'roof-viejo-1', name: 'Barrio Viejo Plaza Roof', district: 'barrio-viejo', x: 118, z: -242, totalTiles: 6, payout: 1800 },
-  { id: 'roof-viejo-2', name: 'Barrio Viejo Courtyard Roof', district: 'barrio-viejo', x: 198, z: -244, totalTiles: 6, payout: 2100 },
+  { id: 'roof-viejo-1', name: 'Barrio Viejo Plaza Roof', district: 'barrio-viejo', x: 198, z: -244, totalTiles: 6, payout: 1800 },
+  { id: 'roof-viejo-2', name: 'Barrio Viejo Courtyard Roof', district: 'barrio-viejo', x: 222, z: -292, totalTiles: 6, payout: 2100 },
+];
+
+// Scenic Navigable River: RÍO DORADO winding from the northern hills (z = -440) down into Marina Bay (z = 160)
+export function getRiverCenterX(z) {
+  if (z >= 165) return 144;
+  if (z <= -445) return 124;
+  if (z >= -180) {
+    // Gentle urban S-curve through Distrito Torre
+    const t = (z + 180) / 345; // 0 at -180, 1 at 165
+    return 146 + Math.sin(t * Math.PI) * 6 - t * 2;
+  }
+  // Smooth curve between Dante's Loft (88,-264) & Rafa's Garage (158,-264) up into the northern hills
+  const t = Math.max(0, Math.min(1, (-180 - z) / 260));
+  const smooth = t * t * (3 - 2 * t);
+  return 146 - smooth * 24 + Math.sin(t * Math.PI * 1.4) * 5;
+}
+
+export function getRiverHalfWidth(z) {
+  if (z > 135) {
+    const t = Math.min(1, (z - 135) / 35);
+    return 13 + t * 14; // Widens into Marina Bay channel
+  }
+  if (z < -210) return 10.5;
+  return 12.5;
+}
+
+// Elevated Bridges with Hollow Passable Underpasses (kolong jembatan)
+export const RIVER_BRIDGES = [
+  { id: 'puente-del-sol', name: 'Puente del Sol', x1: 36, x2: 184, z: 200, halfZ: 12.0, deckY: 5.6, rampLen: 28, isMain: true },
+  { id: 'puente-rio-dorado', name: 'Puente Río Dorado', x1: 112, x2: 174, z: 120, halfZ: 10.5, deckY: 5.5, rampLen: 18 },
+  { id: 'puente-central', name: 'Puente Central', x1: 118, x2: 178, z: 0, halfZ: 10.5, deckY: 5.5, rampLen: 18 },
+  { id: 'puente-norte', name: 'Puente Norte', x1: 116, x2: 174, z: -180, halfZ: 10.5, deckY: 5.5, rampLen: 18 },
+  { id: 'puente-cabo', name: 'Puente del Cabo', x1: 94, x2: 154, z: -340, halfZ: 10.5, deckY: 5.4, rampLen: 16 },
+];
+
+// Enterable Roofed Cover Buildings (shield player from police & HALCÓN-1 helicopter!)
+export const COVER_BUILDINGS = [
+  { id: 'torre-parking', name: 'Torre Covered Parking Deck', district: 'distrito-torre', x: 18, z: 58, w: 26, d: 30, roofY: 5.4 },
+  { id: 'cenit-warehouse-open', name: 'Puerto Cenit Open Warehouse', district: 'puerto-cenit', x: 308, z: -112, w: 30, d: 24, roofY: 6.0 },
+  { id: 'viejo-arcade', name: 'Barrio Viejo Courtyard Arcade', district: 'barrio-viejo', x: 204, z: -212, w: 22, d: 18, roofY: 5.2 },
 ];
 
 // Canonical 100%-synced Map Legend definitions shared by full Pause Map & Minimap

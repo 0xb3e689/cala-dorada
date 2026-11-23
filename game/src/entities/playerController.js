@@ -336,25 +336,94 @@ export function buildCharacterMesh({
   const rightLeg = buildLeg(1);
   g.add(leftLeg.hip, rightLeg.hip);
 
-  // 6. Detailed Multi-Part Weapon + Starburst Muzzle Flash (attached cleanly to Right Hand)
+  // 6. 6 Distinct 3D Held Weapon Meshes + Starburst Muzzle Flash (attached cleanly to Right Hand)
   let gunGroup = null;
   let muzzleFlash = null;
+  let weaponMeshes = null;
   if (withWeapon) {
     gunGroup = new THREE.Group();
     gunGroup.position.set(0, -0.29, 0.045);
     const gunMat = new THREE.MeshStandardMaterial({ color: 0x19202b, metalness: 0.85, roughness: 0.22 });
     const gripMat = new THREE.MeshStandardMaterial({ color: 0x2a3240, roughness: 0.65 });
-    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.072, 0.42, 0.105), gunMat);
-    receiver.position.set(0, -0.14, 0.02);
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.28, 8), gunMat);
-    barrel.position.set(0, -0.44, 0.035);
-    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.048, 0.095, 0.19), gripMat);
-    mag.position.set(0, -0.17, -0.085);
-    const optic = new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.08, 0.045), new THREE.MeshBasicMaterial({ color: 0x34e0c8 }));
-    optic.position.set(0, -0.08, 0.085);
+    const alloyMat = new THREE.MeshStandardMaterial({ color: 0xd2dce8, metalness: 0.88, roughness: 0.22 });
+    const woodMat = new THREE.MeshStandardMaterial({ color: 0x7c4a26, roughness: 0.72 });
+    const opticMat = new THREE.MeshBasicMaterial({ color: 0x34e0c8 });
+
+    // 1. Fists (empty group - bare hands)
+    const fistsM = new THREE.Group();
+
+    // 2. Alloy Bat (tapered gleaming aluminum baseball bat with dark grip)
+    const batM = new THREE.Group();
+    const batGrip = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.026, 0.24, 8), gripMat);
+    batGrip.position.set(0, -0.08, 0.02);
+    const batShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.046, 0.68, 10), alloyMat);
+    batShaft.position.set(0, -0.52, 0.02);
+    const batTip = new THREE.Mesh(new THREE.SphereGeometry(0.046, 10, 8), alloyMat);
+    batTip.position.set(0, -0.86, 0.02);
+    batM.add(batGrip, batShaft, batTip);
+
+    // 3. Sol 9mm Pistol (compact semi-auto slide + grip)
+    const pistolM = new THREE.Group();
+    const pSlide = new THREE.Mesh(new THREE.BoxGeometry(0.054, 0.28, 0.085), gunMat);
+    pSlide.position.set(0, -0.10, 0.025);
+    const pGrip = new THREE.Mesh(new THREE.BoxGeometry(0.046, 0.08, 0.14), gripMat);
+    pGrip.position.set(0, -0.02, -0.045);
+    pistolM.add(pSlide, pGrip);
+
+    // 4. Vector SMG (compact angled receiver + extended mag + foregrip + teal holo dot)
+    const smgM = new THREE.Group();
+    const sRec = new THREE.Mesh(new THREE.BoxGeometry(0.074, 0.40, 0.115), gunMat);
+    sRec.position.set(0, -0.14, 0.02);
+    const sBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.24, 8), gunMat);
+    sBarrel.position.set(0, -0.40, 0.03);
+    const sMag = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.085, 0.22), gripMat);
+    sMag.position.set(0, -0.22, -0.09);
+    const sOptic = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.08, 0.048), opticMat);
+    sOptic.position.set(0, -0.08, 0.09);
+    smgM.add(sRec, sBarrel, sMag, sOptic);
+
+    // 5. Breacher 12G Shotgun (long heavy twin tube/barrel + pump forend + stock)
+    const shotgunM = new THREE.Group();
+    const shStock = new THREE.Mesh(new THREE.BoxGeometry(0.062, 0.24, 0.11), woodMat);
+    shStock.position.set(0, 0.12, -0.02);
+    const shRec = new THREE.Mesh(new THREE.BoxGeometry(0.072, 0.28, 0.115), gunMat);
+    shRec.position.set(0, -0.12, 0.02);
+    const shBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.56, 8), gunMat);
+    shBarrel.position.set(0, -0.48, 0.045);
+    const shTube = new THREE.Mesh(new THREE.CylinderGeometry(0.020, 0.020, 0.46, 8), gripMat);
+    shTube.position.set(0, -0.44, 0.0);
+    const shPump = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.036, 0.20, 8), woodMat);
+    shPump.position.set(0, -0.40, 0.0);
+    shotgunM.add(shStock, shRec, shBarrel, shTube, shPump);
+
+    // 6. Carbine AR (full tactical rifle with stock, quad rail, curved mag, scope optic & long barrel)
+    const carbineM = new THREE.Group();
+    const cStock = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.26, 0.11), gripMat);
+    cStock.position.set(0, 0.14, 0.0);
+    const cRec = new THREE.Mesh(new THREE.BoxGeometry(0.074, 0.48, 0.11), gunMat);
+    cRec.position.set(0, -0.18, 0.02);
+    const cBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.022, 0.40, 8), gunMat);
+    cBarrel.position.set(0, -0.58, 0.03);
+    const cMag = new THREE.Mesh(new THREE.BoxGeometry(0.048, 0.095, 0.23), gripMat);
+    cMag.position.set(0, -0.22, -0.10);
+    cMag.rotation.x = 0.22;
+    const cScope = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.18, 8), gunMat);
+    cScope.position.set(0, -0.10, 0.105);
+    const cDot = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.03, 0.028), opticMat);
+    cDot.position.set(0, -0.10, 0.13);
+    carbineM.add(cStock, cRec, cBarrel, cMag, cScope, cDot);
+
+    weaponMeshes = {
+      fists: fistsM,
+      bat: batM,
+      pistol: pistolM,
+      smg: smgM,
+      shotgun: shotgunM,
+      carbine: carbineM,
+    };
 
     muzzleFlash = new THREE.Group();
-    muzzleFlash.position.set(0, -0.62, 0.035);
+    muzzleFlash.position.set(0, -0.56, 0.035);
     const flashSprite = new THREE.Sprite(new THREE.SpriteMaterial({
       map: getRadialGlowTexture('#ffffff', 'rgba(255,186,62,0.88)', 'rgba(255,92,24,0)'),
       transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
@@ -370,8 +439,9 @@ export function buildCharacterMesh({
     muzzleFlash.add(flashSprite, flashCone, flashLight);
     muzzleFlash.visible = false;
 
-    gunGroup.add(receiver, barrel, mag, optic, muzzleFlash);
+    gunGroup.add(fistsM, batM, pistolM, smgM, shotgunM, carbineM, muzzleFlash);
     rightArm.forearm.add(gunGroup);
+    setCharacterWeaponMesh({ userData: { weaponMeshes, muzzleFlash } }, 'smg');
   }
 
   // 7. 3D Fishing Rod with Line & Floating Bobber (toggled when fishing!)
@@ -420,9 +490,35 @@ export function buildCharacterMesh({
   };
   g.userData.muzzleFlash = muzzleFlash;
   g.userData.gunGroup = gunGroup;
+  g.userData.weaponMeshes = weaponMeshes;
+  g.userData.activeWeaponId = withWeapon ? 'smg' : 'fists';
   g.userData.rodGroup = rodGroup;
   g.userData.bobber = bobber;
   return g;
+}
+
+const MUZZLE_Y_BY_WEAPON = {
+  fists: -0.12,
+  bat: -0.78,
+  pistol: -0.32,
+  smg: -0.56,
+  shotgun: -0.80,
+  carbine: -0.82,
+};
+
+export function setCharacterWeaponMesh(mesh, weaponId) {
+  const wm = mesh?.userData?.weaponMeshes;
+  if (!wm) return;
+  for (const [id, grp] of Object.entries(wm)) {
+    grp.visible = id === weaponId;
+  }
+  mesh.userData.activeWeaponId = weaponId;
+  if (mesh.userData.muzzleFlash) {
+    mesh.userData.muzzleFlash.position.y = MUZZLE_Y_BY_WEAPON[weaponId] ?? -0.56;
+    if (weaponId === 'fists' || weaponId === 'bat') {
+      mesh.userData.muzzleFlash.visible = false;
+    }
+  }
 }
 
 // Smooth articulated 2-segment human pose & stride helper
@@ -576,33 +672,101 @@ export function poseHumanFlinch(mesh, frac) {
   l.armR.rotation.x -= 0.24 * f;
 }
 
-// Smooth swimming tread animation in deep ocean/bay water
-export function poseHumanSwim(mesh, elapsed) {
+// Horizontal swimming & underwater diving pose with freestyle arm strokes and flutter leg kicks!
+export function poseHumanSwim(mesh, elapsed, moving = true, diving = false) {
   const l = mesh.userData.limbs;
   if (!l) return;
-  const s = Math.sin(elapsed * 5.2);
-  l.upperBody.rotation.set(0.32, s * 0.18, 0);
+  const freq = moving ? 6.2 : 3.4;
+  const s = Math.sin(elapsed * freq);
+  const c = Math.cos(elapsed * freq);
+  // Horizontal body pitch forward into water (steeper when diving!)
+  mesh.rotation.x = diving ? 1.32 : (moving ? 1.18 : 0.72);
+  l.upperBody.rotation.set(0.16, s * 0.22, s * 0.08);
   l.upperBody.position.y = 0.88;
-  l.armL.rotation.set(-1.35 + s * 0.55, 0.35, 0.45);
-  l.armR.rotation.set(-1.35 - s * 0.55, -0.35, -0.45);
-  if (l.forearmL) l.forearmL.rotation.set(-0.55, 0, 0);
-  if (l.forearmR) l.forearmR.rotation.set(-0.55, 0, 0);
-  l.legL.rotation.set(s * 0.48, 0, 0);
-  l.legR.rotation.set(-s * 0.48, 0, 0);
-  if (l.calfL) l.calfL.rotation.set(0.35, 0, 0);
-  if (l.calfR) l.calfR.rotation.set(0.35, 0, 0);
+  // Alternating freestyle arm strokes
+  l.armL.rotation.set(-2.35 + s * 0.78, 0.22, 0.35 + c * 0.16);
+  l.armR.rotation.set(-2.35 - s * 0.78, -0.22, -0.35 - c * 0.16);
+  if (l.forearmL) l.forearmL.rotation.set(-0.35 - Math.max(0, s * 0.4), 0, 0);
+  if (l.forearmR) l.forearmR.rotation.set(-0.35 - Math.max(0, -s * 0.4), 0, 0);
+  // Alternating flutter leg kicks
+  const kick = Math.sin(elapsed * (freq * 1.45)) * (moving ? 0.42 : 0.24);
+  l.legL.rotation.set(kick + 0.12, 0, -0.06);
+  l.legR.rotation.set(-kick + 0.12, 0, 0.06);
+  if (l.calfL) l.calfL.rotation.set(0.24 + Math.max(0, -kick * 0.5), 0, 0);
+  if (l.calfR) l.calfR.rotation.set(0.24 + Math.max(0, kick * 0.5), 0, 0);
+}
+
+// Physical 3D Collapse / Fall-Down Death Animation (WASTED player, dead NPCs, enemies & police!)
+export function poseHumanCollapse(mesh, progress, side = 1) {
+  const p = Math.max(0, Math.min(1, progress));
+  // Smooth ease-out fall
+  const ease = 1 - Math.pow(1 - p, 2.4);
+  mesh.rotation.x = -Math.PI * 0.5 * ease;
+  mesh.rotation.z = side * 0.24 * ease;
+  mesh.position.y = 0.20 * ease;
+  const l = mesh.userData.limbs;
+  if (!l) return;
+  l.upperBody.position.y = 0.90;
+  l.upperBody.rotation.set(-0.12 * ease, side * 0.14 * ease, side * 0.08 * ease);
+  l.armL.rotation.set(-0.22 * ease, 0.12 * ease, 0.68 * ease);
+  l.armR.rotation.set(-0.18 * ease, -0.14 * ease, -0.74 * ease);
+  if (l.forearmL) l.forearmL.rotation.set(-0.38 * ease, 0, 0);
+  if (l.forearmR) l.forearmR.rotation.set(-0.42 * ease, 0, 0);
+  l.legL.rotation.set(0.14 * ease, 0, -0.22 * ease);
+  l.legR.rotation.set(-0.08 * ease, 0, 0.24 * ease);
+  if (l.calfL) l.calfL.rotation.set(0.22 * ease, 0, 0);
+  if (l.calfR) l.calfR.rotation.set(0.30 * ease, 0, 0);
+  if (mesh.userData.muzzleFlash) mesh.userData.muzzleFlash.visible = false;
+}
+
+// BUSTED Surrender Animation: Dante raises both hands high & kneels on the pavement!
+export function poseHumanSurrender(mesh, progress) {
+  const p = Math.max(0, Math.min(1, progress));
+  const ease = 1 - Math.pow(1 - p, 2);
+  mesh.rotation.x = 0;
+  mesh.rotation.z = 0;
+  mesh.position.y = -0.34 * ease;
+  const l = mesh.userData.limbs;
+  if (!l) return;
+  l.upperBody.position.y = 0.90;
+  l.upperBody.rotation.set(0.06 * ease, 0, 0);
+  // Both hands raised high in surrender
+  l.armL.rotation.set(-2.65 * ease, 0, 0.34 * ease);
+  l.armR.rotation.set(-2.65 * ease, 0, -0.34 * ease);
+  if (l.forearmL) l.forearmL.rotation.set(-0.42 * ease, 0, 0);
+  if (l.forearmR) l.forearmR.rotation.set(-0.42 * ease, 0, 0);
+  // Kneeling legs
+  l.legL.rotation.set(-0.95 * ease, 0, -0.08 * ease);
+  l.legR.rotation.set(-0.95 * ease, 0, 0.08 * ease);
+  if (l.calfL) l.calfL.rotation.set(1.65 * ease, 0, 0);
+  if (l.calfR) l.calfR.rotation.set(1.65 * ease, 0, 0);
+  if (mesh.userData.muzzleFlash) mesh.userData.muzzleFlash.visible = false;
+}
+
+export function poseHumanMeleeSwing(mesh, progress, isBat = false) {
+  const l = mesh.userData.limbs;
+  if (!l) return;
+  const swing = Math.sin(progress * Math.PI);
+  l.upperBody.rotation.y = (isBat ? -0.55 : -0.38) + swing * 0.95;
+  l.upperBody.rotation.x = 0.14;
+  l.armR.rotation.set(-1.35 + swing * 0.4, -0.6 + swing * 1.45, -0.35);
+  if (l.forearmR) l.forearmR.rotation.set(-0.35, 0, 0);
+  l.armL.rotation.set(-0.85, 0.35, 0.25);
+  if (l.forearmL) l.forearmL.rotation.set(-0.75, 0, 0);
 }
 
 export class PlayerController {
   constructor(scene, collisionWorld) {
     this.scene = scene;
     this.collisionWorld = collisionWorld;
+    this.heldWeaponId = 'pistol';
 
     // Dante Varo (protagonist)
     this.mesh = buildCharacterMesh({
       jacket: 0xe65f3c, accent: 0xffe2ad, pants: 0x1b2230, skin: 0xd9a17a, hair: 0x1b1514,
       outfitStyle: 'bomber', hairStyle: 'swept', accessory: 'aviators',
     });
+    setCharacterWeaponMesh(this.mesh, this.heldWeaponId);
     this.scene.add(this.mesh);
 
     // Crew Partner Nadia Solis (appears during combat/missions with clear teal ally ring)
@@ -610,8 +774,16 @@ export class PlayerController {
       jacket: 0x22c4b6, accent: 0x121824, pants: 0x181e2a, skin: 0xdba584, hair: 0x24161a,
       isFemale: true, allyGlow: true, outfitStyle: 'blazer', hairStyle: 'ponytail', accessory: 'aviators',
     });
+    setCharacterWeaponMesh(this.partnerMesh, 'smg');
     this.partnerMesh.visible = false;
     this.scene.add(this.partnerMesh);
+
+    // Water surface ripple pool for swimming
+    this.rippleGroup = new THREE.Group();
+    this.scene.add(this.rippleGroup);
+    this.ripples = [];
+    this._rippleGeo = new THREE.RingGeometry(0.32, 0.46, 20);
+    this.droppedWeaponMesh = null;
 
     this.pos = new THREE.Vector3(-120, 0, 200);
     this.vel = new THREE.Vector3();
@@ -620,12 +792,118 @@ export class PlayerController {
     this.grounded = true;
     this.aiming = false;
     this.fishing = false;
+    this.swimming = false;
+    this.diving = false;
+    this.submergeDepth = 0;
+    this.rippleTimer = 0;
+    this.splashTimer = 0;
+    this.drownTickTimer = 0;
+    this.meleeSwingTimer = 0;
+    this.deathState = null; // null | 'WASTED' | 'BUSTED'
+    this.deathProgress = 0;
     this.muzzleTimer = 0;
     this.stridePhase = 0;
     this.pantCooldown = 0;
     this.flinchTimer = 0;
     this.knockdownTimer = 0;
     this.knockVel = new THREE.Vector3();
+  }
+
+  setHeldWeapon(weaponId) {
+    this.heldWeaponId = weaponId || 'fists';
+    setCharacterWeaponMesh(this.mesh, this.heldWeaponId);
+  }
+
+  triggerMeleeSwing() {
+    this.meleeSwingTimer = 0.28;
+  }
+
+  startDeathAnim(type) {
+    this.deathState = type;
+    this.deathProgress = 0;
+    this.swimming = false;
+    this.diving = false;
+    this.submergeDepth = 0;
+    if (this.mesh.userData.muzzleFlash) this.mesh.userData.muzzleFlash.visible = false;
+    if (type === 'WASTED') {
+      // Drop weapon prop onto the pavement beside Dante
+      if (this.mesh.userData.gunGroup) this.mesh.userData.gunGroup.visible = false;
+      if (this.droppedWeaponMesh) {
+        this.scene.remove(this.droppedWeaponMesh);
+        this.droppedWeaponMesh = null;
+      }
+      if (this.heldWeaponId !== 'fists') {
+        const drop = new THREE.Mesh(
+          new THREE.BoxGeometry(0.10, 0.08, this.heldWeaponId === 'bat' ? 0.8 : 0.48),
+          new THREE.MeshStandardMaterial({ color: this.heldWeaponId === 'bat' ? 0xd2dce8 : 0x1b222e, metalness: 0.8, roughness: 0.25 })
+        );
+        drop.position.set(this.pos.x + Math.cos(this.yaw) * 0.72, this.pos.y + 0.06, this.pos.z - Math.sin(this.yaw) * 0.72);
+        drop.rotation.y = this.yaw + 0.65;
+        this.scene.add(drop);
+        this.droppedWeaponMesh = drop;
+      }
+    } else if (type === 'BUSTED') {
+      if (this.mesh.userData.gunGroup) this.mesh.userData.gunGroup.visible = false;
+    }
+  }
+
+  updateDeathAnim(dt) {
+    if (!this.deathState) return;
+    this.deathProgress = Math.min(1, this.deathProgress + dt * 1.9);
+    this.mesh.position.x = this.pos.x;
+    this.mesh.position.z = this.pos.z;
+    this.mesh.rotation.y = this.yaw;
+    if (this.deathState === 'WASTED') {
+      poseHumanCollapse(this.mesh, this.deathProgress, 1);
+      this.mesh.position.y = this.pos.y + 0.20 * this.deathProgress;
+    } else if (this.deathState === 'BUSTED') {
+      poseHumanSurrender(this.mesh, this.deathProgress);
+      this.mesh.position.y = this.pos.y - 0.34 * this.deathProgress;
+    }
+  }
+
+  resetDeathAnim() {
+    this.deathState = null;
+    this.deathProgress = 0;
+    this.swimming = false;
+    this.diving = false;
+    this.submergeDepth = 0;
+    this.mesh.rotation.set(0, this.yaw, 0);
+    if (this.mesh.userData.gunGroup) this.mesh.userData.gunGroup.visible = !this.fishing;
+    setCharacterWeaponMesh(this.mesh, this.heldWeaponId);
+    if (this.droppedWeaponMesh) {
+      this.scene.remove(this.droppedWeaponMesh);
+      this.droppedWeaponMesh = null;
+    }
+    poseHumanStride(this.mesh, 0, false);
+  }
+
+  _spawnWaterRipple(x, z) {
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xdff9ff, transparent: true, opacity: 0.62, side: THREE.DoubleSide, depthWrite: false,
+    });
+    const m = new THREE.Mesh(this._rippleGeo, mat);
+    m.rotation.x = -Math.PI / 2;
+    m.position.set(x, 0.08, z);
+    this.rippleGroup.add(m);
+    this.ripples.push({ mesh: m, mat, life: 0.85, maxLife: 0.85 });
+  }
+
+  _updateRipples(dt) {
+    for (let i = this.ripples.length - 1; i >= 0; i--) {
+      const r = this.ripples[i];
+      r.life -= dt;
+      if (r.life <= 0) {
+        this.rippleGroup.remove(r.mesh);
+        r.mat.dispose();
+        this.ripples.splice(i, 1);
+        continue;
+      }
+      const prog = 1 - r.life / r.maxLife;
+      const sc = 1 + prog * 3.8;
+      r.mesh.scale.set(sc, sc, 1);
+      r.mat.opacity = (1 - prog) * 0.58;
+    }
   }
 
   applyAppearance(app) {
@@ -647,6 +925,7 @@ export class PlayerController {
       accessory: app.accessory ?? 'aviators',
       shortSleeves: app.outfitStyle === 'coastal',
     });
+    setCharacterWeaponMesh(this.mesh, this.heldWeaponId);
     this.mesh.position.copy(prevPos);
     this.mesh.rotation.y = prevRotY;
     this.mesh.visible = wasVisible;
@@ -709,7 +988,10 @@ export class PlayerController {
     this.flinchTimer = Math.max(this.flinchTimer, 0.24);
   }
 
-  updateOnFoot(input, dt, elapsed, cameraYaw, state, audio) {
+  updateOnFoot(input, dt, elapsed, cameraYaw, state, audio, onDrownDamage = null) {
+    this._updateRipples(dt);
+    if (this.meleeSwingTimer > 0) this.meleeSwingTimer = Math.max(0, this.meleeSwingTimer - dt);
+
     if (this.fishing) {
       const bob = this.mesh.userData.bobber;
       if (bob) bob.position.y = -2.6 + Math.sin(elapsed * 4.5) * 0.07;
@@ -730,10 +1012,11 @@ export class PlayerController {
         this.pos.x += this.knockVel.x * dt;
         this.pos.z += this.knockVel.z * dt;
       }
+      const surfY = this.collisionWorld ? this.collisionWorld.getSurfaceY(this.pos.x, this.pos.z, this.pos.y) : 0;
       if (!this.grounded) {
         this.vy -= WORLD.gravity * dt;
         this.pos.y += this.vy * dt;
-        if (this.pos.y <= 0) { this.pos.y = 0; this.vy = 0; this.grounded = true; }
+        if (this.pos.y <= surfY) { this.pos.y = surfY; this.vy = 0; this.grounded = true; }
       }
       const getUpFrac = this.knockdownTimer < 0.45 ? this.knockdownTimer / 0.45 : 1.0;
       this.mesh.position.set(this.pos.x, this.pos.y + 0.18 * getUpFrac, this.pos.z);
@@ -742,10 +1025,62 @@ export class PlayerController {
       return;
     }
     this.mesh.rotation.x = 0;
+    this.mesh.rotation.z = 0;
 
     const { forward, right } = input.getMoveAxes();
     const wantsMove = forward !== 0 || right !== 0;
     const wantsSprint = (input.isDown('ShiftLeft') || input.isDown('ShiftRight')) && wantsMove;
+
+    // Water depth (Río Dorado, Marina Bay, Ocean — respects elevated bridge decks!)
+    const waterDepth = this.collisionWorld ? this.collisionWorld.getWaterDepth(this.pos.x, this.pos.z, this.pos.y) : 0;
+    const inDeepWater = waterDepth >= 0.92;
+    const inShallowWater = waterDepth > 0.05 && !inDeepWater;
+
+    // Splash SFX upon entering deep water
+    if (inDeepWater && !this.swimming && audio) {
+      audio.playWaterSplash(0.9);
+      this._spawnWaterRipple(this.pos.x, this.pos.z);
+    }
+    this.swimming = inDeepWater;
+    if (state) state.swimming = inDeepWater;
+
+    // Diving Underwater with [C] or [Control], surfacing with [Space]
+    if (inDeepWater) {
+      const wantsDive = input.isDown('KeyC') || input.isDown('ControlLeft') || input.isDown('ControlRight');
+      const wantsSurface = input.isDown('Space');
+      const maxSubmerge = Math.max(0.9, Math.min(2.35, waterDepth - 0.35));
+      if (wantsDive) {
+        this.submergeDepth = Math.min(maxSubmerge, this.submergeDepth + dt * 1.45);
+      } else if (wantsSurface) {
+        this.submergeDepth = Math.max(0, this.submergeDepth - dt * 1.85);
+      }
+      this.diving = this.submergeDepth > 0.32;
+    } else {
+      this.submergeDepth = 0;
+      this.diving = false;
+    }
+
+    if (state) {
+      state.diving = this.diving;
+      state.submergeDepth = this.submergeDepth;
+      if (this.diving) {
+        // ~50 seconds of breath underwater (2.0% / sec)
+        state.oxygen = Math.max(0, (state.oxygen ?? 100) - dt * 2.0);
+        if (state.oxygen <= 0) {
+          this.drownTickTimer -= dt;
+          if (this.drownTickTimer <= 0) {
+            this.drownTickTimer = 0.65;
+            if (audio) audio.playUnderwaterBubble();
+            if (onDrownDamage) onDrownDamage(6);
+          }
+        } else {
+          this.drownTickTimer = 0.15;
+        }
+      } else {
+        state.oxygen = Math.min(state.maxOxygen ?? 100, (state.oxygen ?? 100) + dt * 28);
+        this.drownTickTimer = 0.2;
+      }
+    }
 
     // Stamina & Exhaustion ("ngos-ngosan") system
     let sprinting = false;
@@ -754,7 +1089,7 @@ export class PlayerController {
         state.exhaustTimer = Math.max(0, state.exhaustTimer - dt);
         state.stamina = Math.min(state.maxStamina, state.stamina + dt * 10.5);
         this.pantCooldown -= dt;
-        if (this.pantCooldown <= 0) {
+        if (this.pantCooldown <= 0 && !this.diving) {
           this.pantCooldown = 0.88;
           if (audio) audio.playPantBreath();
         }
@@ -763,7 +1098,7 @@ export class PlayerController {
         }
       } else if (wantsSprint && state.stamina > 0) {
         sprinting = true;
-        state.stamina = Math.max(0, state.stamina - dt * 18.0);
+        state.stamina = Math.max(0, state.stamina - dt * (inDeepWater ? 11.0 : 18.0));
         if (state.stamina <= 0) {
           state.exhausted = true;
           state.exhaustTimer = 3.5;
@@ -777,15 +1112,10 @@ export class PlayerController {
       sprinting = wantsSprint;
     }
 
-    // Natural physical water boundary (shallow surf slows; deep water smoothly swims & pushes back toward shore)
-    const waterDepth = this.collisionWorld ? this.collisionWorld.getWaterDepth(this.pos.x, this.pos.z) : 0;
-    const inDeepWater = waterDepth >= 1.05;
-    const inShallowWater = waterDepth > 0.05 && !inDeepWater;
-
-    // Realistic human speeds: walk 2.0 m/s, sprint 5.6 m/s, exhausted 1.35 m/s
+    // Realistic human speeds: walk 2.0 m/s, sprint 5.6 m/s, exhausted 1.35 m/s, swim 2.4 m/s (3.15 m/s fast swim)
     let speed = state?.exhausted ? 1.35 : sprinting ? 5.6 : 2.0;
-    if (inShallowWater) speed *= 0.56;
-    else if (inDeepWater) speed = 1.9;
+    if (inShallowWater) speed *= 0.62;
+    else if (inDeepWater) speed = sprinting ? 3.15 : 2.4;
 
     const moveYaw = cameraYaw ?? this.yaw;
     let mx = 0;
@@ -800,21 +1130,20 @@ export class PlayerController {
       const len = Math.hypot(mx, mz) || 1;
       mx = (mx / len) * speed;
       mz = (mz / len) * speed;
-      if (!input.rightMouseDown && !input.mouseDown) {
+      if (inDeepWater || (!input.rightMouseDown && !input.mouseDown)) {
         this.yaw = Math.atan2(mx, mz);
       }
     }
 
-    // Smooth coastal return current if swimming too far out into deep ocean
+    // Far open-ocean gentle return current only past z > 380
     if (inDeepWater && this.collisionWorld) {
       const ret = this.collisionWorld.getShoreReturnVector(this.pos.x, this.pos.z);
-      const push = Math.min(3.4, (waterDepth - 0.9) * 2.2);
-      mx += ret.x * push;
-      mz += ret.z * push;
+      mx += ret.x * 2.5;
+      mz += ret.z * 2.5;
     }
 
-    // Aiming faces camera yaw smoothly
-    if (input.mouseDown || input.rightMouseDown || (state?.reloadTimer > 0)) {
+    // Aiming faces camera yaw smoothly (on dry land / shallow water)
+    if (!inDeepWater && (input.mouseDown || input.rightMouseDown || (state?.reloadTimer > 0))) {
       this.yaw = moveYaw;
     }
 
@@ -826,6 +1155,7 @@ export class PlayerController {
       this.pos.z += mz * dt;
     }
 
+    const surfaceY = this.collisionWorld ? this.collisionWorld.getSurfaceY(this.pos.x, this.pos.z, this.pos.y) : 0;
     if (this.grounded && !inDeepWater && input.consumePress('Space')) {
       this.vy = 9.2;
       this.grounded = false;
@@ -833,17 +1163,27 @@ export class PlayerController {
     if (!this.grounded) {
       this.vy -= WORLD.gravity * dt;
       this.pos.y += this.vy * dt;
-      if (this.pos.y <= 0) {
-        this.pos.y = 0;
+      if (this.pos.y <= surfaceY) {
+        this.pos.y = surfaceY;
         this.vy = 0;
         this.grounded = true;
       }
+    } else if (!inDeepWater) {
+      this.pos.y = THREE.MathUtils.lerp(this.pos.y, surfaceY, Math.min(1, dt * 16));
+      if (Math.abs(this.pos.y - surfaceY) < 0.05) this.pos.y = surfaceY;
+    } else {
+      this.pos.y = 0;
     }
 
-    // Sink subtly when wading/swimming in water
-    const waterSink = inDeepWater ? -0.68 : inShallowWater ? -waterDepth * 0.35 : 0;
+    // Visual vertical position (floating horizontally at surface or submerged when diving!)
+    const waterSink = inDeepWater ? (-0.72 - this.submergeDepth) : inShallowWater ? -waterDepth * 0.35 : 0;
     this.mesh.position.set(this.pos.x, this.pos.y + waterSink, this.pos.z);
     this.mesh.rotation.y = this.yaw;
+
+    // Hide held weapon while swimming so arms stroke naturally
+    if (this.mesh.userData.gunGroup && !this.fishing) {
+      this.mesh.userData.gunGroup.visible = !inDeepWater;
+    }
 
     const actualSpd = Math.hypot(mx, mz);
     const moving = actualSpd > 0.25;
@@ -851,9 +1191,24 @@ export class PlayerController {
       this.stridePhase += dt * (sprinting ? 13.0 : state?.exhausted ? 4.8 : 6.4);
     }
 
-    // Distinct Pose Priority: Deep Water Swim -> Exhausted -> Sprint -> Walk -> Idle -> Combat/Reload -> Flinch
+    // Water ripples & periodic splash sound while swimming
     if (inDeepWater) {
-      poseHumanSwim(this.mesh, elapsed);
+      this.rippleTimer -= dt;
+      if (this.rippleTimer <= 0 && !this.diving) {
+        this.rippleTimer = moving ? 0.28 : 0.65;
+        this._spawnWaterRipple(this.pos.x, this.pos.z);
+      }
+      this.splashTimer -= dt;
+      if (this.splashTimer <= 0 && moving && audio) {
+        this.splashTimer = 0.65;
+        if (this.diving) audio.playUnderwaterBubble();
+        else audio.playWaterSplash(0.35);
+      }
+    }
+
+    // Distinct Pose Priority: Deep Water Swim -> Exhausted -> Sprint -> Walk -> Idle -> Melee/Combat/Reload -> Flinch
+    if (inDeepWater) {
+      poseHumanSwim(this.mesh, elapsed, moving, this.diving);
     } else if (state?.exhausted) {
       poseHumanExhausted(this.mesh, elapsed, moving, this.stridePhase);
     } else if (sprinting && moving) {
@@ -864,14 +1219,18 @@ export class PlayerController {
       poseHumanStride(this.mesh, 0, false);
     }
 
-    // Reload 3D arm animation overrides upper-body arms cleanly
-    if (state && state.reloadTimer > 0 && state.reloadDuration > 0) {
-      const prog = 1 - state.reloadTimer / state.reloadDuration;
-      poseHumanReload(this.mesh, prog);
-    } else if (!inDeepWater && (input.mouseDown || input.rightMouseDown || this.muzzleTimer > 0)) {
-      this.setCombatPose(true);
-    } else {
-      this.aiming = false;
+    // Reload / Melee Swing / Combat Aim overrides upper body cleanly on land
+    if (!inDeepWater) {
+      if (this.meleeSwingTimer > 0) {
+        poseHumanMeleeSwing(this.mesh, 1 - this.meleeSwingTimer / 0.28, this.heldWeaponId === 'bat');
+      } else if (state && state.reloadTimer > 0 && state.reloadDuration > 0) {
+        const prog = 1 - state.reloadTimer / state.reloadDuration;
+        poseHumanReload(this.mesh, prog);
+      } else if (input.mouseDown || input.rightMouseDown || this.muzzleTimer > 0) {
+        this.setCombatPose(true);
+      } else {
+        this.aiming = false;
+      }
     }
 
     if (this.flinchTimer > 0) {

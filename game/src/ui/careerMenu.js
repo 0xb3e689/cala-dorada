@@ -3,7 +3,8 @@
 import { DISTRICTS, PROPERTIES } from '../core/config.js';
 import { computeCompletionPercent, getEmpireIncomePerHour, formatTimeClock } from '../core/gameState.js';
 import {
-  ROAD_X, ROAD_Z, PUBLIC_FACILITIES, FISHING_SPOTS, GARDEN_SITES, ROOF_REPAIR_SITES, MAP_LEGEND, computeGpsPath,
+  ROAD_X, ROAD_Z, PUBLIC_FACILITIES, FISHING_SPOTS, GARDEN_SITES, ROOF_REPAIR_SITES, MAP_LEGEND,
+  getRiverCenterX, getRiverHalfWidth, RIVER_BRIDGES, computeGpsPath,
 } from '../world/cityPlan.js';
 
 const TABS = ['MAP', 'STATS', 'SAVE', 'SETTINGS'];
@@ -203,7 +204,8 @@ export class CareerMenu {
       <div class="info-card">
         <h3>Controls</h3>
         <p><strong>WASD</strong> Move / Drive · <strong>Mouse</strong> Look / Aim<br>
-        <strong>Shift</strong> Sprint / Nitro · <strong>Space</strong> Jump / Handbrake<br>
+        <strong>Shift</strong> Sprint / Nitro · <strong>Space</strong> Jump / Handbrake / Surface<br>
+        <strong>C / Ctrl</strong> Dive Underwater · <strong>1–6 / Scroll</strong> Weapons<br>
         <strong>F</strong> Enter / Exit Vehicle · <strong>E</strong> Interact / Bail Out<br>
         <strong>Q / Tab</strong> Weapon Wheel · <strong>R</strong> Reload / Radio<br>
         <strong>Z / X / C</strong> Crew Support · <strong>Esc / M</strong> Pause Map</p>
@@ -361,6 +363,24 @@ export class CareerMenu {
       ctx.stroke();
     }
 
+    // Navigable Río Dorado River winding from northern hills down into Marina Bay!
+    ctx.fillStyle = '#0e4963';
+    ctx.beginPath();
+    for (let z = -438; z <= 165; z += 16) {
+      const rx = mapX(getRiverCenterX(z) - getRiverHalfWidth(z));
+      const ry = mapY(z);
+      if (z === -438) ctx.moveTo(rx, ry);
+      else ctx.lineTo(rx, ry);
+    }
+    for (let z = 165; z >= -438; z -= 16) {
+      ctx.lineTo(mapX(getRiverCenterX(z) + getRiverHalfWidth(z)), mapY(z));
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(52, 224, 200, 0.36)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+
     // District Zones
     for (const d of DISTRICTS) {
       const x1 = mapX(d.bounds.x1);
@@ -406,19 +426,21 @@ export class CareerMenu {
     }
     ctx.stroke();
 
-    // Puente del Sol Bridge
-    ctx.strokeStyle = '#e0453b';
-    ctx.lineWidth = 9;
-    ctx.beginPath();
-    ctx.moveTo(mapX(38), mapY(200));
-    ctx.lineTo(mapX(182), mapY(200));
-    ctx.stroke();
-    ctx.strokeStyle = '#ffc857';
-    ctx.lineWidth = 1.6;
-    ctx.beginPath();
-    ctx.moveTo(mapX(38), mapY(200));
-    ctx.lineTo(mapX(182), mapY(200));
-    ctx.stroke();
+    // Puente del Sol & Río Dorado River Bridges
+    for (const br of RIVER_BRIDGES) {
+      ctx.strokeStyle = br.isMain ? '#e0453b' : '#7b8fa8';
+      ctx.lineWidth = br.isMain ? 9 : 7;
+      ctx.beginPath();
+      ctx.moveTo(mapX(br.x1), mapY(br.z));
+      ctx.lineTo(mapX(br.x2), mapY(br.z));
+      ctx.stroke();
+      ctx.strokeStyle = '#ffc857';
+      ctx.lineWidth = br.isMain ? 1.6 : 1.1;
+      ctx.beginPath();
+      ctx.moveTo(mapX(br.x1), mapY(br.z));
+      ctx.lineTo(mapX(br.x2), mapY(br.z));
+      ctx.stroke();
+    }
 
     // District Name Badges
     ctx.font = '800 10px "Avenir Next", system-ui, sans-serif';
@@ -544,11 +566,13 @@ export class CareerMenu {
       ctx.strokeStyle = '#180c06'; ctx.lineWidth = 1.5; ctx.stroke();
     }
 
-    // Bridge & Park crisp labels
+    // Bridge, River & Park crisp labels
     ctx.font = '800 8.5px "Avenir Next", system-ui, sans-serif';
     ctx.fillStyle = '#ffe0a3';
     ctx.textAlign = 'center';
     ctx.fillText('PUENTE DEL SOL', mapX(110), mapY(200) - 12);
+    ctx.fillStyle = '#7ee8f7';
+    ctx.fillText('RÍO DORADO', mapX(150), mapY(60));
     ctx.fillStyle = '#b4f8d2';
     ctx.fillText('PARQUE DORADO', mapX(pk.x), mapY(pk.z) + 17);
 
