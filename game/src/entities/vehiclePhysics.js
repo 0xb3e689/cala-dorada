@@ -198,6 +198,9 @@ export class VehiclePhysics {
 
     const wheels = v.mesh.userData?.wheels ?? [];
     for (const w of wheels) w.rotation.x += vFwd * dt * 1.9;
+    if (v.mesh.userData?.nitroFlames) {
+      v.mesh.userData.nitroFlames.visible = boost;
+    }
 
     // Tire drift smoke & nitro flame puffs
     if ((v.drifting || boost) && Math.random() < 0.65) {

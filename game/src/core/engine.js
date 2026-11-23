@@ -336,7 +336,7 @@ export class CalaDoradaEngine {
       this.traffic.update(dt, this.elapsed, new THREE.Vector3(-120, 0, 200), false);
     }
 
-    this.sky.applyTimeOfDay(this.state.timeOfDay, pos);
+    this.sky.applyTimeOfDay(this.state.timeOfDay, pos, this.shotSunDir ?? null);
     this.sky.updateAmbient(dt, this.elapsed, this.worldAnim);
     this._updateCamera(dt);
     this.renderer.render(this.scene, this.camera);
@@ -370,9 +370,9 @@ export class CalaDoradaEngine {
     }
 
     if (this.state.mode === 'title') {
-      const t = this.elapsed * 0.14;
-      this.camera.position.set(-195 + Math.sin(t) * 28, 22 + Math.cos(t * 0.7) * 2.5, 256);
-      this.camera.lookAt(-20, 14, 152);
+      const t = this.elapsed * 0.12;
+      this.camera.position.set(-135 + Math.sin(t) * 24, 33 + Math.cos(t * 0.7) * 2.5, 305);
+      this.camera.lookAt(68, 17, 178);
       return;
     }
 

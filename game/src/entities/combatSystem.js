@@ -1,8 +1,9 @@
-// 6-weapon combat system: bullet tracers, muzzle flashes, sparks, Los Caimanes syndicate enemies, and pickups.
+// 6-weapon combat system: dual-core additive bullet tracers, muzzle flashes, sparks, Los Caimanes enemies, and pickups.
 
 import * as THREE from '../../vendor/three.module.min.js';
 import { WEAPONS } from '../core/config.js';
 import { buildCharacterMesh } from './playerController.js';
+import { getRadialGlowTexture } from './vehicleFactory.js';
 
 export class CombatSystem {
   constructor(scene) {
@@ -24,15 +25,15 @@ export class CombatSystem {
 
   spawnEnemy(x, z, yaw = 0, downed = false) {
     const mesh = buildCharacterMesh({
-      jacket: 0x1e4d5c, accent: 0xffbe55, pants: 0x161a24, skin: 0xcf9670, hair: 0x171414,
+      jacket: 0x1a3f4d, accent: 0xff4b5c, pants: 0x141822, skin: 0xcf9670, hair: 0x171414,
     });
-    mesh.position.set(x, downed ? 0.25 : 0, z);
+    mesh.position.set(x, downed ? 0.22 : 0, z);
     mesh.rotation.y = yaw;
     if (downed) {
       mesh.rotation.x = -Math.PI / 2;
     } else {
-      mesh.userData.limbs.armR.rotation.x = -1.42;
-      mesh.userData.limbs.armL.rotation.x = -1.1;
+      mesh.userData.limbs.armR.rotation.x = -1.45;
+      mesh.userData.limbs.armL.rotation.x = -1.15;
     }
     this.group.add(mesh);
     const enemy = {
@@ -58,32 +59,55 @@ export class CombatSystem {
     }
   }
 
-  spawnTracer(start, end, color = 0xffe073, radius = 0.055, life = 0.16) {
+  spawnTracer(start, end, color = 0xffe073, radius = 0.04, life = 0.16) {
     const dir = new THREE.Vector3().subVectors(end, start);
     const len = dir.length();
     if (len < 0.2) return;
-    const geo = new THREE.CylinderGeometry(radius, radius * 0.55, len, 5);
-    const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.copy(start).addScaledVector(dir, 0.5);
-    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
-    this.group.add(mesh);
-    this.tracers.push({ mesh, life, maxLife: life });
+
+    const grp = new THREE.Group();
+    const coreGeo = new THREE.CylinderGeometry(radius * 0.65, radius * 0.25, len, 6);
+    const coreMat = new THREE.MeshBasicMaterial({
+      color: 0xfff8dc, transparent: true, opacity: 0.96, blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const sheathGeo = new THREE.CylinderGeometry(radius * 1.9, radius * 0.9, len, 6);
+    const sheathMat = new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    grp.add(new THREE.Mesh(coreGeo, coreMat), new THREE.Mesh(sheathGeo, sheathMat));
+    grp.position.copy(start).addScaledVector(dir, 0.5);
+    grp.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+    this.group.add(grp);
+    this.tracers.push({ mesh: grp, mats: [coreMat, sheathMat], geos: [coreGeo, sheathGeo], life, maxLife: life });
   }
 
   spawnSparks(pos, count = 7, color = 0xffbd4a) {
-    const geo = new THREE.BoxGeometry(0.11, 0.11, 0.24);
+    const geo = new THREE.BoxGeometry(0.08, 0.08, 0.34);
     for (let i = 0; i < count; i++) {
-      const mat = new THREE.MeshBasicMaterial({ color });
+      const mat = new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false,
+      });
       const m = new THREE.Mesh(geo, mat);
       m.position.copy(pos);
+      const vx = (Math.random() - 0.5) * 9;
+      const vy = 2 + Math.random() * 6;
+      const vz = (Math.random() - 0.5) * 9;
+      m.lookAt(pos.x + vx, pos.y + vy, pos.z + vz);
       this.group.add(m);
       this.sparks.push({
         mesh: m,
-        vel: new THREE.Vector3((Math.random() - 0.5) * 9, 2 + Math.random() * 6, (Math.random() - 0.5) * 9),
+        vel: new THREE.Vector3(vx, vy, vz),
         life: 0.28 + Math.random() * 0.2,
       });
     }
+    // Impact flash sprite
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: getRadialGlowTexture('#ffffff', 'rgba(255,168,54,0.85)', 'rgba(0,0,0,0)'),
+      transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    sp.scale.set(1.6, 1.6, 1);
+    sp.position.copy(pos);
+    this.group.add(sp);
+    this.sparks.push({ mesh: sp, vel: new THREE.Vector3(0, 0.4, 0), life: 0.22 });
   }
 
   spawnPickup(pos, kind = 'health') {
@@ -147,7 +171,7 @@ export class CombatSystem {
 
       const endPoint = origin.clone().addScaledVector(dir, bestDist);
       if (!weapon.melee) {
-        this.spawnTracer(origin, endPoint, 0xffe47a, 0.05, 0.14);
+        this.spawnTracer(origin, endPoint, 0xffe47a, 0.04, 0.14);
       }
       if (hitEnemy) {
         hitEnemy.hp -= weapon.damage;
@@ -155,7 +179,7 @@ export class CombatSystem {
         if (hitEnemy.hp <= 0 && !hitEnemy.downed) {
           hitEnemy.downed = true;
           hitEnemy.mesh.rotation.x = -Math.PI / 2;
-          hitEnemy.mesh.position.y = 0.25;
+          hitEnemy.mesh.position.y = 0.22;
           hitEnemy.mesh.userData.muzzleFlash.visible = false;
           state.careerStats.takedowns += 1;
           state.cash += 350;
@@ -177,11 +201,13 @@ export class CombatSystem {
       t.life -= dt;
       if (t.life <= 0) {
         this.group.remove(t.mesh);
-        t.mesh.geometry.dispose();
-        t.mesh.material.dispose();
+        t.geos.forEach((g) => g.dispose());
+        t.mats.forEach((m) => m.dispose());
         this.tracers.splice(i, 1);
       } else {
-        t.mesh.material.opacity = t.life / t.maxLife;
+        const frac = t.life / t.maxLife;
+        t.mats[0].opacity = frac * 0.96;
+        t.mats[1].opacity = frac * 0.45;
       }
     }
 
@@ -229,7 +255,7 @@ export class CombatSystem {
           e.mesh.userData.muzzleFlash.visible = true;
           const orig = e.pos.clone().add(new THREE.Vector3(0, 1.38, 0));
           const tgt = playerPos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2.2, 1.2, (Math.random() - 0.5) * 2.2));
-          this.spawnTracer(orig, tgt, 0xff6b4a, 0.045, 0.14);
+          this.spawnTracer(orig, tgt, 0xff6b4a, 0.038, 0.14);
           if (Math.random() < 0.35 && onPlayerHit) onPlayerHit(7);
         }
       }

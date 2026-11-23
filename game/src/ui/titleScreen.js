@@ -22,7 +22,7 @@ export class TitleScreen {
         <div class="slot-mission">${data ? data.missionTitle : 'Empty Syndicate Slot'}</div>
         <div class="slot-meta">
           <span>${data ? `${data.districtName} · Saved ${data.savedDate} ${data.savedAt}` : 'Start Dante Varo\'s Gold Coast takeover'}</span>
-          <span class="slot-cash">${data ? `$${data.cash.toLocaleString()}` : '$24,500'}</span>
+          <span class="slot-cash" style="${data ? '' : 'color:#34e0c8'}">${data ? `$${data.cash.toLocaleString()}` : 'START FRESH'}</span>
         </div>
       </div>`).join('');
 
